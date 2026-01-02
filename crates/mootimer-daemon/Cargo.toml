@@ -1,0 +1,38 @@
+[package]
+name = "mootimer-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "mootimer_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mootimerd"
+path = "src/main.rs"
+
+[dependencies]
+mootimer-core.workspace = true
+mootimer-jira.workspace = true
+
+tokio.workspace = true
+tokio-serde.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Additional daemon-specific dependencies
+clap = { version = "4.5", features = ["derive"] }
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3.12"

@@ -1,0 +1,371 @@
+//! Entry manager for time entry operations
+
+use chrono::{DateTime, Datelike, Utc};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use mootimer_core::{
+    models::Entry,
+    storage::{init_data_dir, EntryStorage},
+    Result as CoreResult,
+};
+
+/// Entry manager error
+#[derive(Debug, thiserror::Error)]
+pub enum EntryManagerError {
+    #[error("Entry not found: {0}")]
+    NotFound(String),
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] mootimer_core::Error),
+
+    #[error("Invalid entry: {0}")]
+    Invalid(String),
+
+    #[error("Task join error: {0}")]
+    JoinError(String),
+}
+
+pub type Result<T> = std::result::Result<T, EntryManagerError>;
+
+/// Filter for querying entries
+#[derive(Debug, Clone)]
+pub struct EntryFilter {
+    pub start_date: Option<DateTime<Utc>>,
+    pub end_date: Option<DateTime<Utc>>,
+    pub task_id: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+/// Statistics for time entries
+#[derive(Debug, Clone)]
+pub struct EntryStats {
+    pub total_entries: usize,
+    pub total_duration_seconds: u64,
+    pub total_duration_hours: f64,
+    pub pomodoro_count: usize,
+    pub manual_count: usize,
+    pub avg_duration_seconds: u64,
+}
+
+/// Manages time entries with caching and persistence
+pub struct EntryManager {
+    data_dir: PathBuf,
+    /// Cache: profile_id -> Vec<Entry>
+    cache: Arc<RwLock<HashMap<String, Vec<Entry>>>>,
+}
+
+impl EntryManager {
+    /// Create a new entry manager
+    pub fn new() -> CoreResult<Self> {
+        let data_dir = init_data_dir()?;
+
+        Ok(Self {
+            data_dir,
+            cache: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    /// Load all entries for a profile (blocking I/O wrapped in spawn_blocking)
+    pub async fn load_profile(&self, profile_id: &str) -> Result<()> {
+        let data_dir = self.data_dir.clone();
+        let profile_id_owned = profile_id.to_string();
+
+        let entries = tokio::task::spawn_blocking(move || {
+            let storage = EntryStorage::new(data_dir);
+            storage.load(&profile_id_owned)
+        })
+        .await
+        .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
+
+        tracing::info!(
+            "Loaded {} entries for profile '{}'",
+            entries.len(),
+            profile_id
+        );
+        let mut cache = self.cache.write().await;
+        cache.insert(profile_id.to_string(), entries);
+        Ok(())
+    }
+
+    /// Add a new entry for a profile
+    pub async fn add(&self, profile_id: &str, entry: Entry) -> Result<Entry> {
+        // Validate entry
+        entry
+            .validate()
+            .map_err(|e| EntryManagerError::Invalid(e.to_string()))?;
+
+        // Append to storage using spawn_blocking for blocking I/O
+        let data_dir = self.data_dir.clone();
+        let profile_id_owned = profile_id.to_string();
+        let entry_clone = entry.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let storage = EntryStorage::new(data_dir);
+            storage.append(&profile_id_owned, &entry_clone)
+        })
+        .await
+        .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
+
+        // Add to cache
+        {
+            let mut cache = self.cache.write().await;
+            cache
+                .entry(profile_id.to_string())
+                .or_insert_with(Vec::new)
+                .push(entry.clone());
+        }
+
+        Ok(entry)
+    }
+
+    /// Get all entries for a profile
+    pub async fn get_all(&self, profile_id: &str) -> Result<Vec<Entry>> {
+        // Try cache first
+        {
+            let cache = self.cache.read().await;
+            if let Some(entries) = cache.get(profile_id) {
+                return Ok(entries.clone());
+            }
+        }
+
+        // Load from storage
+        self.load_profile(profile_id).await?;
+
+        // Get from cache
+        let cache = self.cache.read().await;
+        Ok(cache.get(profile_id).cloned().unwrap_or_default())
+    }
+
+    /// Get entries with filter
+    pub async fn filter(&self, profile_id: &str, filter: EntryFilter) -> Result<Vec<Entry>> {
+        let entries = self.get_all(profile_id).await?;
+
+        Ok(entries
+            .into_iter()
+            .filter(|entry| {
+                // Filter by date range
+                if let Some(start) = filter.start_date {
+                    if entry.start_time < start {
+                        return false;
+                    }
+                }
+                if let Some(end) = filter.end_date {
+                    if entry.start_time > end {
+                        return false;
+                    }
+                }
+
+                // Filter by task
+                if let Some(ref task_id) = filter.task_id {
+                    if entry.task_id.as_ref() != Some(task_id) {
+                        return false;
+                    }
+                }
+
+                // Filter by tags
+                if let Some(ref tags) = filter.tags {
+                    if !tags.iter().any(|tag| entry.has_tag(tag)) {
+                        return false;
+                    }
+                }
+
+                true
+            })
+            .collect())
+    }
+
+    /// Get entries for today
+    pub async fn get_today(&self, profile_id: &str) -> Result<Vec<Entry>> {
+        let now = Utc::now();
+        let start_of_day = now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .map(|dt| dt.and_utc())
+            .unwrap_or(now);
+
+        self.filter(
+            profile_id,
+            EntryFilter {
+                start_date: Some(start_of_day),
+                end_date: None,
+                task_id: None,
+                tags: None,
+            },
+        )
+        .await
+    }
+
+    /// Get entries for current week
+    pub async fn get_week(&self, profile_id: &str) -> Result<Vec<Entry>> {
+        let now = Utc::now();
+        let days_from_monday = now.weekday().num_days_from_monday();
+        let start_of_week = now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .map(|dt| dt.and_utc())
+            .map(|dt| dt - chrono::Duration::days(days_from_monday as i64))
+            .unwrap_or(now);
+
+        self.filter(
+            profile_id,
+            EntryFilter {
+                start_date: Some(start_of_week),
+                end_date: None,
+                task_id: None,
+                tags: None,
+            },
+        )
+        .await
+    }
+
+    /// Get entries for current month
+    pub async fn get_month(&self, profile_id: &str) -> Result<Vec<Entry>> {
+        let now = Utc::now();
+        let start_of_month = now
+            .date_naive()
+            .with_day(1)
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| dt.and_utc())
+            .unwrap_or(now);
+
+        self.filter(
+            profile_id,
+            EntryFilter {
+                start_date: Some(start_of_month),
+                end_date: None,
+                task_id: None,
+                tags: None,
+            },
+        )
+        .await
+    }
+
+    /// Calculate statistics for entries
+    pub fn calculate_stats(entries: &[Entry]) -> EntryStats {
+        let total_duration: u64 = entries.iter().map(|e| e.duration_seconds).sum();
+        let pomodoro_count = entries
+            .iter()
+            .filter(|e| e.mode == mootimer_core::models::TimerMode::Pomodoro)
+            .count();
+        let manual_count = entries.len() - pomodoro_count;
+
+        EntryStats {
+            total_entries: entries.len(),
+            total_duration_seconds: total_duration,
+            total_duration_hours: total_duration as f64 / 3600.0,
+            pomodoro_count,
+            manual_count,
+            avg_duration_seconds: if entries.is_empty() {
+                0
+            } else {
+                total_duration / entries.len() as u64
+            },
+        }
+    }
+
+    /// Get statistics for today
+    pub async fn get_today_stats(&self, profile_id: &str) -> Result<EntryStats> {
+        let entries = self.get_today(profile_id).await?;
+        Ok(Self::calculate_stats(&entries))
+    }
+
+    /// Get statistics for current week
+    pub async fn get_week_stats(&self, profile_id: &str) -> Result<EntryStats> {
+        let entries = self.get_week(profile_id).await?;
+        Ok(Self::calculate_stats(&entries))
+    }
+
+    /// Get statistics for current month
+    pub async fn get_month_stats(&self, profile_id: &str) -> Result<EntryStats> {
+        let entries = self.get_month(profile_id).await?;
+        Ok(Self::calculate_stats(&entries))
+    }
+}
+
+impl Default for EntryManager {
+    fn default() -> Self {
+        Self::new().expect("Failed to create EntryManager")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+    use mootimer_core::models::{Entry, TimerMode};
+
+    #[tokio::test]
+    async fn test_add_entry() {
+        let manager = EntryManager::new().unwrap();
+        let profile_id = "test_entry";
+
+        let entry = Entry::new(Some("task1".to_string()), TimerMode::Manual);
+        let added = manager.add(profile_id, entry).await.unwrap();
+
+        assert!(added.is_active());
+    }
+
+    #[tokio::test]
+    async fn test_get_all_entries() {
+        let manager = EntryManager::new().unwrap();
+        let profile_id = "test_get_all";
+
+        let entry1 = Entry::new(None, TimerMode::Manual);
+        let entry2 = Entry::new(None, TimerMode::Pomodoro);
+
+        manager.add(profile_id, entry1).await.unwrap();
+        manager.add(profile_id, entry2).await.unwrap();
+
+        let entries = manager.get_all(profile_id).await.unwrap();
+        assert!(entries.len() >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_filter_by_task() {
+        let manager = EntryManager::new().unwrap();
+        let profile_id = "test_filter";
+
+        let entry1 = Entry::new(Some("task1".to_string()), TimerMode::Manual);
+        let entry2 = Entry::new(Some("task2".to_string()), TimerMode::Manual);
+
+        manager.add(profile_id, entry1).await.unwrap();
+        manager.add(profile_id, entry2).await.unwrap();
+
+        let filtered = manager
+            .filter(
+                profile_id,
+                EntryFilter {
+                    start_date: None,
+                    end_date: None,
+                    task_id: Some("task1".to_string()),
+                    tags: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].task_id, Some("task1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_calculate_stats() {
+        let start = Utc::now();
+        let end1 = start + Duration::hours(1);
+        let end2 = start + Duration::hours(2);
+
+        let entry1 = Entry::create_completed(None, start, end1, TimerMode::Manual).unwrap();
+
+        let entry2 = Entry::create_completed(None, start, end2, TimerMode::Pomodoro).unwrap();
+
+        let stats = EntryManager::calculate_stats(&[entry1, entry2]);
+
+        assert_eq!(stats.total_entries, 2);
+        assert_eq!(stats.pomodoro_count, 1);
+        assert_eq!(stats.manual_count, 1);
+        assert_eq!(stats.total_duration_seconds, 3600 + 7200);
+    }
+}

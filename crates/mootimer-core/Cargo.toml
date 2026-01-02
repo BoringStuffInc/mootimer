@@ -1,0 +1,21 @@
+[package]
+name = "mootimer-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+csv.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+git2.workspace = true
+dirs = "5.0"
+
+[dev-dependencies]
+tempfile = "3.12"

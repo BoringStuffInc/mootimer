@@ -1,0 +1,29 @@
+[package]
+name = "mootimer-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "mootimer"
+path = "src/main.rs"
+
+[dependencies]
+mootimer-core.workspace = true
+mootimer-client.workspace = true
+
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+futures = "0.3"
+
+ratatui.workspace = true
+crossterm.workspace = true
+notify-rust = "4.11"
+
+clap = { version = "4.5", features = ["derive"] }

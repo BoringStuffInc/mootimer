@@ -1,0 +1,40 @@
+[workspace]
+members = [
+    "crates/mootimer-core",
+    "crates/mootimer-daemon",
+    "crates/mootimer-client",
+    "crates/mootimer-tui",
+    "crates/mootimer-jira",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["MooTimer Contributors"]
+license = "MIT"
+repository = "https://github.com/yourusername/mootimer"
+
+[workspace.dependencies]
+mootimer-core = { path = "crates/mootimer-core" }
+mootimer-daemon = { path = "crates/mootimer-daemon" }
+mootimer-client = { path = "crates/mootimer-client" }
+mootimer-jira = { path = "crates/mootimer-jira" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1.3"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+thiserror = "2.0"
+anyhow = "1"
+git2 = "0.19"
+tokio = { version = "1", features = ["full"] }
+tokio-serde = { version = "0.9", features = ["json"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+ratatui = "0.29"
+crossterm = "0.28"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", features = ["json"] }
+keyring = "3.6"
