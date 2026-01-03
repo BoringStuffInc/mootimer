@@ -6,11 +6,13 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var(
-        "XDG_DATA_HOME",
-        "/tmp/mootimer-integration-test/.local/share",
-    );
-    std::env::set_var("XDG_CONFIG_HOME", "/tmp/mootimer-integration-test/.config");
+    unsafe {
+        std::env::set_var(
+            "XDG_DATA_HOME",
+            "/tmp/mootimer-integration-test/.local/share",
+        );
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/mootimer-integration-test/.config");
+    }
 
     let client = MooTimerClient::new("/tmp/mootimer-integration.sock");
 

@@ -1,6 +1,6 @@
 //! Configuration storage operations
 
-use crate::{models::Config, Result};
+use crate::{Result, models::Config};
 use std::path::PathBuf;
 
 pub struct ConfigStorage {

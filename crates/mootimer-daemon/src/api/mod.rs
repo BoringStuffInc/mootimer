@@ -7,16 +7,18 @@ pub mod sync;
 pub mod task;
 pub mod timer;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::config::ConfigManager;
 use crate::entry::EntryManager;
+use crate::event_manager::EventManager;
+use crate::events::DaemonEvent;
 use crate::profile::ProfileManager;
 use crate::sync::SyncManager;
 use crate::task::TaskManager;
-use crate::timer::{TimerEvent, TimerManager};
+use crate::timer::TimerManager;
 
 /// API error
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +40,7 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 
 /// Main API handler that routes requests to appropriate handlers
 pub struct ApiHandler {
+    event_manager: Arc<EventManager>,
     timer_manager: Arc<TimerManager>,
     profile_manager: Arc<ProfileManager>,
     task_manager: Arc<TaskManager>,
@@ -47,20 +50,15 @@ pub struct ApiHandler {
 }
 
 impl ApiHandler {
-    /// Create a new API handler
     pub fn new(
-        timer_manager: TimerManager,
-        profile_manager: ProfileManager,
-        task_manager: TaskManager,
-        entry_manager: EntryManager,
-        config_manager: ConfigManager,
-        sync_manager: SyncManager,
+        event_manager: Arc<EventManager>,
+        timer_manager: Arc<TimerManager>,
+        profile_manager: Arc<ProfileManager>,
+        task_manager: Arc<TaskManager>,
+        entry_manager: Arc<EntryManager>,
+        config_manager: Arc<ConfigManager>,
+        sync_manager: Arc<SyncManager>,
     ) -> Self {
-        let timer_manager = Arc::new(timer_manager);
-        let entry_manager = Arc::new(entry_manager);
-        let sync_manager = Arc::new(sync_manager);
-        let config_manager = Arc::new(config_manager);
-
         // Spawn task to save completed entries from auto-stopped timers
         let tm = timer_manager.clone();
         let em = entry_manager.clone();
@@ -102,10 +100,11 @@ impl ApiHandler {
                             tracing::warn!("Failed to auto-commit: {}", e);
                         }
 
-                        if config.sync.auto_push && config.sync.remote_url.is_some() {
-                            if let Err(e) = sm.sync(&config.sync).await {
-                                tracing::warn!("Failed to auto-sync: {}", e);
-                            }
+                        if config.sync.auto_push
+                            && config.sync.remote_url.is_some()
+                            && let Err(e) = sm.sync(&config.sync).await
+                        {
+                            tracing::warn!("Failed to auto-sync: {}", e);
                         }
                     }
                 }
@@ -113,16 +112,16 @@ impl ApiHandler {
         });
 
         Self {
+            event_manager,
             timer_manager,
-            profile_manager: Arc::new(profile_manager),
-            task_manager: Arc::new(task_manager),
+            profile_manager,
+            task_manager,
             entry_manager,
             config_manager,
             sync_manager,
         }
     }
 
-    /// Handle an API method call
     pub async fn handle(&self, method: &str, params: Option<Value>) -> Result<Value> {
         match method {
             // Timer methods
@@ -154,6 +153,8 @@ impl ApiHandler {
             // Entry methods
             "entry.list" => self.handle_entry_list(params).await,
             "entry.filter" => self.handle_entry_filter(params).await,
+            "entry.delete" => self.handle_entry_delete(params).await,
+            "entry.update" => self.handle_entry_update(params).await,
             "entry.today" => self.handle_entry_today(params).await,
             "entry.week" => self.handle_entry_week(params).await,
             "entry.month" => self.handle_entry_month(params).await,
@@ -183,9 +184,8 @@ impl ApiHandler {
         }
     }
 
-    /// Subscribe to timer events
-    pub fn subscribe_events(&self) -> broadcast::Receiver<TimerEvent> {
-        self.timer_manager.subscribe()
+    pub fn subscribe_events(&self) -> broadcast::Receiver<DaemonEvent> {
+        self.event_manager.subscribe()
     }
 
     // Timer API methods
@@ -194,7 +194,7 @@ impl ApiHandler {
     }
 
     async fn handle_timer_start_pomodoro(&self, params: Option<Value>) -> Result<Value> {
-        timer::start_pomodoro(&self.timer_manager, params).await
+        timer::start_pomodoro(&self.timer_manager, &self.config_manager, params).await
     }
 
     async fn handle_timer_start_countdown(&self, params: Option<Value>) -> Result<Value> {
@@ -287,6 +287,14 @@ impl ApiHandler {
         entry::filter(&self.entry_manager, params).await
     }
 
+    async fn handle_entry_delete(&self, params: Option<Value>) -> Result<Value> {
+        entry::delete(&self.entry_manager, params).await
+    }
+
+    async fn handle_entry_update(&self, params: Option<Value>) -> Result<Value> {
+        entry::update(&self.entry_manager, params).await
+    }
+
     async fn handle_entry_today(&self, params: Option<Value>) -> Result<Value> {
         entry::get_today(&self.entry_manager, params).await
     }
@@ -362,6 +370,111 @@ impl ApiHandler {
     }
 
     async fn handle_sync_set_remote(&self, params: Option<Value>) -> Result<Value> {
-        sync::set_remote(&self.sync_manager, params).await
+        sync::set_remote(&self.sync_manager, params).await?;
+        Ok(Value::Null)
+    }
+
+    // --- Direct API Access Methods for MCP ---
+
+    pub async fn profile_list(&self) -> Result<Value> {
+        profile::list(&self.profile_manager, None).await
+    }
+
+    pub async fn task_list(&self, profile_id: &str) -> Result<Value> {
+        task::list(
+            &self.task_manager,
+            Some(json!({ "profile_id": profile_id })),
+        )
+        .await
+    }
+
+    pub async fn task_create(
+        &self,
+        profile_id: &str,
+        title: &str,
+        description: Option<&str>,
+    ) -> Result<Value> {
+        task::create(
+            &self.task_manager,
+            Some(json!({ "profile_id": profile_id, "title": title, "description": description })),
+        )
+        .await
+    }
+
+    pub async fn task_update(&self, profile_id: &str, task: Value) -> Result<Value> {
+        task::update(
+            &self.task_manager,
+            Some(json!({ "profile_id": profile_id, "task": task })),
+        )
+        .await
+    }
+
+    pub async fn task_delete(&self, profile_id: &str, task_id: &str) -> Result<Value> {
+        task::delete(
+            &self.task_manager,
+            Some(json!({ "profile_id": profile_id, "task_id": task_id })),
+        )
+        .await
+    }
+
+    pub async fn timer_get(&self, profile_id: &str) -> Result<Value> {
+        timer::get(
+            &self.timer_manager,
+            Some(json!({ "profile_id": profile_id })),
+        )
+        .await
+    }
+
+    pub async fn timer_start_manual(
+        &self,
+        profile_id: &str,
+        task_id: Option<&str>,
+    ) -> Result<Value> {
+        timer::start_manual(
+            &self.timer_manager,
+            Some(json!({ "profile_id": profile_id, "task_id": task_id })),
+        )
+        .await
+    }
+
+    pub async fn timer_start_pomodoro(
+        &self,
+        profile_id: &str,
+        task_id: Option<&str>,
+        config_override: Option<Value>,
+    ) -> Result<Value> {
+        let mut params = json!({ "profile_id": profile_id, "task_id": task_id });
+        if let Some(config) = config_override {
+            params["config"] = config;
+        }
+        timer::start_pomodoro(&self.timer_manager, &self.config_manager, Some(params)).await
+    }
+
+    pub async fn timer_start_countdown(
+        &self,
+        profile_id: &str,
+        task_id: Option<&str>,
+        duration_minutes: u64,
+    ) -> Result<Value> {
+        timer::start_countdown(&self.timer_manager, Some(json!({ "profile_id": profile_id, "task_id": task_id, "duration_minutes": duration_minutes }))).await
+    }
+
+    pub async fn timer_stop(&self, profile_id: &str) -> Result<Value> {
+        timer::stop(
+            &self.timer_manager,
+            &self.entry_manager,
+            &self.sync_manager,
+            &self.config_manager,
+            Some(json!({ "profile_id": profile_id })),
+        )
+        .await
+    }
+
+    pub async fn task_get(&self, profile_id: &str, task_id: &str) -> Result<Value> {
+        task::get(
+            &self.task_manager,
+            Some(json!({ "profile_id": profile_id, "task_id": task_id })),
+        )
+        .await
     }
 }

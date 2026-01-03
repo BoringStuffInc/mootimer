@@ -6,10 +6,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::event_manager::EventManager;
+use crate::events::EntryEvent;
 use mootimer_core::{
-    models::Entry,
-    storage::{init_data_dir, EntryStorage},
     Result as CoreResult,
+    models::Entry,
+    storage::{EntryStorage, init_data_dir},
 };
 
 /// Entry manager error
@@ -55,16 +57,19 @@ pub struct EntryManager {
     data_dir: PathBuf,
     /// Cache: profile_id -> Vec<Entry>
     cache: Arc<RwLock<HashMap<String, Vec<Entry>>>>,
+    /// Event manager for broadcasting events
+    event_manager: Arc<EventManager>,
 }
 
 impl EntryManager {
     /// Create a new entry manager
-    pub fn new() -> CoreResult<Self> {
+    pub fn new(event_manager: Arc<EventManager>) -> CoreResult<Self> {
         let data_dir = init_data_dir()?;
 
         Ok(Self {
             data_dir,
             cache: Arc::new(RwLock::new(HashMap::new())),
+            event_manager,
         })
     }
 
@@ -118,6 +123,10 @@ impl EntryManager {
                 .push(entry.clone());
         }
 
+        // Emit entry added event
+        let event = EntryEvent::added(profile_id.to_string(), entry.clone());
+        self.event_manager.emit_entry(event);
+
         Ok(entry)
     }
 
@@ -147,29 +156,29 @@ impl EntryManager {
             .into_iter()
             .filter(|entry| {
                 // Filter by date range
-                if let Some(start) = filter.start_date {
-                    if entry.start_time < start {
-                        return false;
-                    }
+                if let Some(start) = filter.start_date
+                    && entry.start_time < start
+                {
+                    return false;
                 }
-                if let Some(end) = filter.end_date {
-                    if entry.start_time > end {
-                        return false;
-                    }
+                if let Some(end) = filter.end_date
+                    && entry.start_time > end
+                {
+                    return false;
                 }
 
                 // Filter by task
-                if let Some(ref task_id) = filter.task_id {
-                    if entry.task_id.as_ref() != Some(task_id) {
-                        return false;
-                    }
+                if let Some(ref task_id) = filter.task_id
+                    && entry.task_id.as_ref() != Some(task_id)
+                {
+                    return false;
                 }
 
                 // Filter by tags
-                if let Some(ref tags) = filter.tags {
-                    if !tags.iter().any(|tag| entry.has_tag(tag)) {
-                        return false;
-                    }
+                if let Some(ref tags) = filter.tags
+                    && !tags.iter().any(|tag| entry.has_tag(tag))
+                {
+                    return false;
                 }
 
                 true
@@ -283,23 +292,109 @@ impl EntryManager {
         let entries = self.get_month(profile_id).await?;
         Ok(Self::calculate_stats(&entries))
     }
+
+    /// Delete an entry
+    pub async fn delete(&self, profile_id: &str, entry_id: &str) -> Result<()> {
+        let mut entries = self.get_all(profile_id).await?;
+
+        let initial_len = entries.len();
+        entries.retain(|e| e.id != entry_id);
+
+        if entries.len() == initial_len {
+            return Err(EntryManagerError::NotFound(entry_id.to_string()));
+        }
+
+        // Save to storage
+        let data_dir = self.data_dir.clone();
+        let profile_id_owned = profile_id.to_string();
+        let entries_clone = entries.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let storage = EntryStorage::new(data_dir);
+            storage.save_all(&profile_id_owned, &entries_clone)
+        })
+        .await
+        .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
+
+        // Update cache
+        {
+            let mut cache = self.cache.write().await;
+            cache.insert(profile_id.to_string(), entries);
+        }
+
+        // Emit entry deleted event
+        let event = EntryEvent::deleted(profile_id.to_string(), entry_id.to_string());
+        self.event_manager.emit_entry(event);
+
+        Ok(())
+    }
+
+    /// Update an entry
+    pub async fn update(&self, profile_id: &str, entry: Entry) -> Result<()> {
+        let mut entries = self.get_all(profile_id).await?;
+
+        let mut found = false;
+        for e in entries.iter_mut() {
+            if e.id == entry.id {
+                *e = entry.clone();
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            return Err(EntryManagerError::NotFound(entry.id));
+        }
+
+        // Save to storage
+        let data_dir = self.data_dir.clone();
+        let profile_id_owned = profile_id.to_string();
+        let entries_clone = entries.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let storage = EntryStorage::new(data_dir);
+            storage.save_all(&profile_id_owned, &entries_clone)
+        })
+        .await
+        .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
+
+        // Update cache
+        {
+            let mut cache = self.cache.write().await;
+            cache.insert(profile_id.to_string(), entries);
+        }
+
+        // Emit entry updated event
+        let event = EntryEvent::updated(profile_id.to_string(), entry.clone());
+        self.event_manager.emit_entry(event);
+
+        Ok(())
+    }
 }
 
 impl Default for EntryManager {
     fn default() -> Self {
-        Self::new().expect("Failed to create EntryManager")
+        Self::new(Arc::new(crate::event_manager::EventManager::new()))
+            .expect("Failed to create EntryManager")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_manager::EventManager;
     use chrono::Duration;
     use mootimer_core::models::{Entry, TimerMode};
+    use std::sync::Arc;
+
+    fn create_manager() -> EntryManager {
+        let event_manager = Arc::new(EventManager::new());
+        EntryManager::new(event_manager).unwrap()
+    }
 
     #[tokio::test]
     async fn test_add_entry() {
-        let manager = EntryManager::new().unwrap();
+        let manager = create_manager();
         let profile_id = "test_entry";
 
         let entry = Entry::new(Some("task1".to_string()), TimerMode::Manual);
@@ -310,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_all_entries() {
-        let manager = EntryManager::new().unwrap();
+        let manager = create_manager();
         let profile_id = "test_get_all";
 
         let entry1 = Entry::new(None, TimerMode::Manual);
@@ -325,7 +420,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_by_task() {
-        let manager = EntryManager::new().unwrap();
+        let manager = create_manager();
         let profile_id = "test_filter";
 
         let entry1 = Entry::new(Some("task1".to_string()), TimerMode::Manual);

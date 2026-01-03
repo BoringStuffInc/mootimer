@@ -1,6 +1,6 @@
 //! Profile storage operations
 
-use crate::{models::Profile, Result};
+use crate::{Result, models::Profile};
 use std::path::PathBuf;
 
 pub struct ProfileStorage {
@@ -45,12 +45,11 @@ impl ProfileStorage {
         let mut profiles = Vec::new();
         for entry in std::fs::read_dir(profiles_dir)? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                if let Some(profile_id) = entry.file_name().to_str() {
-                    if let Ok(profile) = self.load(profile_id) {
-                        profiles.push(profile);
-                    }
-                }
+            if entry.file_type()?.is_dir()
+                && let Some(profile_id) = entry.file_name().to_str()
+                && let Ok(profile) = self.load(profile_id)
+            {
+                profiles.push(profile);
             }
         }
 

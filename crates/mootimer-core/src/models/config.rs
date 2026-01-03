@@ -24,6 +24,12 @@ pub struct PomodoroConfig {
     pub short_break: u64,
     pub long_break: u64,
     pub sessions_until_long_break: u32,
+    #[serde(default = "default_countdown")]
+    pub countdown_default: u64, // Default countdown duration in seconds
+}
+
+fn default_countdown() -> u64 {
+    1800 // 30 minutes
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -34,7 +40,6 @@ pub struct SyncConfig {
 }
 
 impl Config {
-    /// Validate the configuration
     pub fn validate(&self) -> Result<()> {
         self.daemon.validate()?;
         self.pomodoro.validate()?;
@@ -56,7 +61,6 @@ impl Default for Config {
 }
 
 impl DaemonConfig {
-    /// Validate daemon configuration
     pub fn validate(&self) -> Result<()> {
         if self.socket_path.trim().is_empty() {
             return Err(Error::Validation("Socket path cannot be empty".to_string()));
@@ -85,7 +89,6 @@ impl Default for DaemonConfig {
 }
 
 impl PomodoroConfig {
-    /// Validate pomodoro configuration
     pub fn validate(&self) -> Result<()> {
         if self.work_duration == 0 {
             return Err(Error::Validation(
@@ -137,17 +140,14 @@ impl PomodoroConfig {
         Ok(())
     }
 
-    /// Get work duration in minutes
     pub fn work_minutes(&self) -> u64 {
         self.work_duration / 60
     }
 
-    /// Get short break in minutes
     pub fn short_break_minutes(&self) -> u64 {
         self.short_break / 60
     }
 
-    /// Get long break in minutes
     pub fn long_break_minutes(&self) -> u64 {
         self.long_break / 60
     }
@@ -160,12 +160,12 @@ impl Default for PomodoroConfig {
             short_break: 300,    // 5 minutes
             long_break: 900,     // 15 minutes
             sessions_until_long_break: 4,
+            countdown_default: 1800, // 30 minutes
         }
     }
 }
 
 impl SyncConfig {
-    /// Validate sync configuration
     pub fn validate(&self) -> Result<()> {
         if self.auto_push && self.remote_url.is_none() {
             return Err(Error::Validation(
@@ -173,10 +173,10 @@ impl SyncConfig {
             ));
         }
 
-        if let Some(ref url) = self.remote_url {
-            if url.trim().is_empty() {
-                return Err(Error::Validation("Remote URL cannot be empty".to_string()));
-            }
+        if let Some(ref url) = self.remote_url
+            && url.trim().is_empty()
+        {
+            return Err(Error::Validation("Remote URL cannot be empty".to_string()));
         }
 
         Ok(())

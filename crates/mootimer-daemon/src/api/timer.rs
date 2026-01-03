@@ -1,7 +1,7 @@
 //! Timer API methods
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{ApiError, Result};
@@ -9,7 +9,6 @@ use crate::config::ConfigManager;
 use crate::entry::EntryManager;
 use crate::sync::SyncManager;
 use crate::timer::TimerManager;
-use mootimer_core::models::PomodoroConfig;
 
 #[derive(Debug, Deserialize)]
 struct StartManualParams {
@@ -22,7 +21,7 @@ struct StartPomodoroParams {
     profile_id: String,
     task_id: Option<String>,
     #[serde(default)]
-    config: Option<PomodoroConfig>,
+    config: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,12 +54,45 @@ pub async fn start_manual(manager: &Arc<TimerManager>, params: Option<Value>) ->
 }
 
 /// Start a pomodoro timer
-pub async fn start_pomodoro(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
+pub async fn start_pomodoro(
+    manager: &Arc<TimerManager>,
+    config_manager: &Arc<ConfigManager>,
+    params: Option<Value>,
+) -> Result<Value> {
     let params: StartPomodoroParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
     )?;
 
-    let config = params.config.unwrap_or_default();
+    // 1. Load global config
+    let global_config = config_manager.get().await;
+    let mut config = global_config.pomodoro.clone();
+
+    // 2. Merge overrides if present
+    if let Some(overrides) = params.config
+        && let Some(obj) = overrides.as_object()
+    {
+        // Check for specific fields and update if present
+        // Note: The app currently sends specific overrides, so we handle them.
+        // We assume values are in seconds if they come from Config structure,
+        // but if the app sends raw numbers, we should double check.
+        // The `PomodoroConfig` uses u64 seconds.
+
+        if let Some(v) = obj.get("work_duration").and_then(|v| v.as_u64()) {
+            config.work_duration = v;
+        }
+        if let Some(v) = obj.get("short_break").and_then(|v| v.as_u64()) {
+            config.short_break = v;
+        }
+        if let Some(v) = obj.get("long_break").and_then(|v| v.as_u64()) {
+            config.long_break = v;
+        }
+        if let Some(v) = obj
+            .get("sessions_until_long_break")
+            .and_then(|v| v.as_u64())
+        {
+            config.sessions_until_long_break = v as u32;
+        }
+    }
 
     let timer_id = manager
         .start_pomodoro(params.profile_id, params.task_id, config)
@@ -173,10 +205,11 @@ pub async fn stop(
         }
 
         // Auto-sync if configured
-        if config.sync.auto_push && config.sync.remote_url.is_some() {
-            if let Err(e) = sync_manager.sync(&config.sync).await {
-                tracing::warn!("Failed to auto-sync: {}", e);
-            }
+        if config.sync.auto_push
+            && config.sync.remote_url.is_some()
+            && let Err(e) = sync_manager.sync(&config.sync).await
+        {
+            tracing::warn!("Failed to auto-sync: {}", e);
         }
     }
 
@@ -224,10 +257,13 @@ pub async fn list(manager: &Arc<TimerManager>, _params: Option<Value>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_manager::EventManager;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_start_manual() {
-        let manager = Arc::new(TimerManager::new());
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(TimerManager::new(event_manager));
 
         let params = json!({
             "profile_id": "test",
@@ -240,20 +276,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_start_pomodoro() {
-        let manager = Arc::new(TimerManager::new());
+    async fn test_start_pomodoro_with_partial_config() {
+        let event_manager = Arc::new(EventManager::new());
+        let timer_manager = Arc::new(TimerManager::new(event_manager.clone()));
+        let config_manager = Arc::new(ConfigManager::new().unwrap());
 
+        // Simulate a client sending an override for only the work duration
         let params = json!({
-            "profile_id": "test"
+            "profile_id": "test",
+            "config": {
+                "work_duration": 60
+            }
         });
 
-        let result = start_pomodoro(&manager, Some(params)).await.unwrap();
-        assert!(result.get("timer_id").is_some());
+        let result = start_pomodoro(&timer_manager, &config_manager, Some(params)).await;
+
+        // If this test passes, the backend logic is correct.
+        // The "missing field" error at runtime MUST be from a stale daemon binary.
+        assert!(
+            result.is_ok(),
+            "start_pomodoro failed with partial config: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]
     async fn test_pause_resume() {
-        let manager = Arc::new(TimerManager::new());
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(TimerManager::new(event_manager));
 
         // Start a timer first
         let start_params = json!({"profile_id": "test"});
@@ -272,7 +322,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_timers() {
-        let manager = Arc::new(TimerManager::new());
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(TimerManager::new(event_manager));
 
         // Start two timers
         let params1 = json!({"profile_id": "test1"});

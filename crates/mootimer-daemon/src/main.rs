@@ -6,11 +6,13 @@ use anyhow::Result;
 use clap::Parser;
 use mootimer_core::storage::init_data_dir;
 use mootimer_daemon::{
-    ApiHandler, ConfigManager, EntryManager, IpcServer, ProfileManager, SyncManager, TaskManager,
-    TimerManager,
+    ApiHandler, ConfigManager, EntryManager, EventManager, IpcServer, ProfileManager, SyncManager,
+    TaskManager, TimerManager,
 };
 use std::fs;
 use std::sync::Arc;
+
+mod mcp;
 
 #[derive(Parser, Debug)]
 #[command(name = "mootimerd")]
@@ -23,12 +25,49 @@ struct Args {
     /// Log level
     #[arg(short, long, default_value = "info")]
     log_level: String,
+
+    /// Run in Model Context Protocol (MCP) server mode
+    #[arg(long)]
+    mcp: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    if args.mcp {
+        // Run as MCP server (connects to existing daemon)
+        mcp::run_mcp_server(args.socket).await
+    } else {
+        // Run as standard daemon
+        // Initialize event manager
+        let event_manager = Arc::new(EventManager::new());
+
+        // Initialize managers
+        let timer_manager = Arc::new(TimerManager::new(event_manager.clone()));
+        let profile_manager = Arc::new(ProfileManager::new(event_manager.clone())?);
+        profile_manager.load_all().await?; // load_all needs access to the manager so it needs to be Arc'd first
+        let task_manager = Arc::new(TaskManager::new(event_manager.clone())?);
+        let entry_manager = Arc::new(EntryManager::new(event_manager.clone())?);
+        let config_manager = Arc::new(ConfigManager::new()?);
+        let sync_manager = Arc::new(SyncManager::new()?);
+
+        // Initialize API handler
+        let api_handler = Arc::new(ApiHandler::new(
+            event_manager,
+            timer_manager,
+            profile_manager,
+            task_manager,
+            entry_manager,
+            config_manager,
+            sync_manager,
+        ));
+
+        run_daemon(args, api_handler).await
+    }
+}
+
+async fn run_daemon(args: Args, api_handler: Arc<ApiHandler>) -> Result<()> {
     // Initialize data directory and log file
     let data_dir = init_data_dir()?;
     let log_file_path = data_dir.join("daemon.log");
@@ -54,35 +93,12 @@ async fn main() -> Result<()> {
     tracing::info!("Socket path: {}", args.socket);
     tracing::info!("Log file: {}", log_file_path.display());
 
-    // Initialize managers
-    let timer_manager = TimerManager::new();
     tracing::info!("Timer manager initialized");
-
-    let profile_manager = ProfileManager::new()?;
-    profile_manager.load_all().await?;
     tracing::info!("Profile manager initialized");
-
-    let task_manager = TaskManager::new()?;
     tracing::info!("Task manager initialized");
-
-    let entry_manager = EntryManager::new()?;
     tracing::info!("Entry manager initialized");
-
-    let config_manager = ConfigManager::new()?;
     tracing::info!("Config manager initialized");
-
-    let sync_manager = SyncManager::new()?;
     tracing::info!("Sync manager initialized");
-
-    // Initialize API handler
-    let api_handler = Arc::new(ApiHandler::new(
-        timer_manager,
-        profile_manager,
-        task_manager,
-        entry_manager,
-        config_manager,
-        sync_manager,
-    ));
     tracing::info!("API handler initialized");
 
     // Initialize and start IPC server

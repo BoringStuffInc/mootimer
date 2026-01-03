@@ -1,8 +1,8 @@
 //! Time entry storage operations (CSV format)
 
 use crate::{
-    models::{Entry, TimerMode},
     Result,
+    models::{Entry, TimerMode},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

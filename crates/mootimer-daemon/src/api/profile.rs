@@ -1,7 +1,7 @@
 //! Profile API methods
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{ApiError, Result};
@@ -110,27 +110,34 @@ pub async fn delete(manager: &Arc<ProfileManager>, params: Option<Value>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use crate::event_manager::EventManager;
+    use std::sync::Arc;
 
     #[tokio::test]
-    async fn test_create_profile() {
-        let manager = Arc::new(ProfileManager::new().unwrap());
-        manager.load_all().await.unwrap();
+    async fn test_create_and_get_profile() {
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(ProfileManager::new(event_manager).unwrap());
 
         let params = json!({
-            "id": format!("test_api_{}", Uuid::new_v4()),
-            "name": "Test API Profile"
+            "id": "test_profile_api",
+            "name": "Test Profile API"
         });
 
         let result = create(&manager, Some(params)).await.unwrap();
         assert!(result.get("id").is_some());
+
+        let get_params = json!({ "profile_id": "test_profile_api" });
+        let get_result = get(&manager, Some(get_params)).await.unwrap();
+        assert_eq!(
+            get_result.get("name").unwrap().as_str().unwrap(),
+            "Test Profile API"
+        );
     }
 
     #[tokio::test]
     async fn test_list_profiles() {
-        let manager = Arc::new(ProfileManager::new().unwrap());
-        manager.load_all().await.unwrap();
-
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(ProfileManager::new(event_manager).unwrap());
         let result = list(&manager, None).await.unwrap();
         assert!(result.is_array());
     }

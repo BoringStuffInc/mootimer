@@ -18,6 +18,7 @@ struct UpdatePomodoroParams {
     short_break: Option<u64>,
     long_break: Option<u64>,
     sessions_until_long_break: Option<u32>,
+    countdown_default: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +63,7 @@ pub async fn update_pomodoro(manager: &Arc<ConfigManager>, params: Option<Value>
             params.short_break,
             params.long_break,
             params.sessions_until_long_break,
+            params.countdown_default,
         )
         .await
         .map_err(|e| ApiError::InvalidParams(e.to_string()))?;

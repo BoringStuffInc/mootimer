@@ -1,6 +1,6 @@
 //! Task storage operations
 
-use crate::{models::Task, Result};
+use crate::{Result, models::Task};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

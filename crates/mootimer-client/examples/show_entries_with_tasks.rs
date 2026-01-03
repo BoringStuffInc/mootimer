@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
         println!("  ENTRIES WITH TASK NAMES");
         println!("═══════════════════════════════════════════════════════\n");
 
-        for (i, entry) in entry_arr.iter().enumerate() {
+        for entry in entry_arr.iter() {
             let entry_id = entry
                 .get("id")
                 .and_then(|v| v.as_str())

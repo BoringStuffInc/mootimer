@@ -26,7 +26,6 @@ pub enum TimerMode {
 }
 
 impl Entry {
-    /// Create a new time entry
     pub fn new(task_id: Option<String>, mode: TimerMode) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -40,7 +39,6 @@ impl Entry {
         }
     }
 
-    /// Create a completed entry with specific times
     pub fn create_completed(
         task_id: Option<String>,
         start_time: DateTime<Utc>,
@@ -70,7 +68,6 @@ impl Entry {
         })
     }
 
-    /// Finish the entry (set end time and calculate duration)
     pub fn finish(&mut self) {
         let end_time = Utc::now();
         let duration = end_time
@@ -82,7 +79,6 @@ impl Entry {
         self.duration_seconds = duration;
     }
 
-    /// Finish the entry at a specific time
     pub fn finish_at(&mut self, end_time: DateTime<Utc>) -> Result<()> {
         if end_time <= self.start_time {
             return Err(Error::Validation(
@@ -100,30 +96,26 @@ impl Entry {
         Ok(())
     }
 
-    /// Validate the entry data
     pub fn validate(&self) -> Result<()> {
-        if let Some(end_time) = self.end_time {
-            if end_time <= self.start_time {
-                return Err(Error::Validation(
-                    "End time must be after start time".to_string(),
-                ));
-            }
+        if let Some(end_time) = self.end_time
+            && end_time <= self.start_time
+        {
+            return Err(Error::Validation(
+                "End time must be after start time".to_string(),
+            ));
         }
 
         Ok(())
     }
 
-    /// Check if the entry is completed (has end time)
     pub fn is_completed(&self) -> bool {
         self.end_time.is_some()
     }
 
-    /// Check if the entry is currently active
     pub fn is_active(&self) -> bool {
         self.end_time.is_none()
     }
 
-    /// Get the duration as a formatted string (HH:MM:SS)
     pub fn duration_formatted(&self) -> String {
         let hours = self.duration_seconds / 3600;
         let minutes = (self.duration_seconds % 3600) / 60;
@@ -131,17 +123,14 @@ impl Entry {
         format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
     }
 
-    /// Get the duration in minutes (rounded)
     pub fn duration_minutes(&self) -> u64 {
         (self.duration_seconds + 30) / 60 // Round to nearest minute
     }
 
-    /// Get the duration in hours (rounded to 2 decimal places)
     pub fn duration_hours(&self) -> f64 {
         (self.duration_seconds as f64 / 3600.0 * 100.0).round() / 100.0
     }
 
-    /// Calculate current elapsed time for active entries
     pub fn current_elapsed_seconds(&self) -> u64 {
         if let Some(end_time) = self.end_time {
             end_time
@@ -156,26 +145,22 @@ impl Entry {
         }
     }
 
-    /// Update the entry's description
     pub fn update_description(&mut self, description: Option<String>) {
         self.description = description;
     }
 
-    /// Add a tag to the entry
     pub fn add_tag(&mut self, tag: String) {
         if !self.tags.contains(&tag) {
             self.tags.push(tag);
         }
     }
 
-    /// Remove a tag from the entry
     pub fn remove_tag(&mut self, tag: &str) {
         if let Some(pos) = self.tags.iter().position(|t| t == tag) {
             self.tags.remove(pos);
         }
     }
 
-    /// Check if the entry has a specific tag
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.iter().any(|t| t == tag)
     }

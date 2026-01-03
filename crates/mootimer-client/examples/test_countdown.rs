@@ -28,12 +28,7 @@ async fn main() -> anyhow::Result<()> {
                 .get("target_duration")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let remaining = if target > elapsed {
-                target - elapsed
-            } else {
-                0
-            };
-
+            let remaining = target.saturating_sub(elapsed);
             println!("  Elapsed: {}s", elapsed);
             println!("  Target: {}s ({}m)", target, target / 60);
             println!("  Remaining: {}s", remaining);

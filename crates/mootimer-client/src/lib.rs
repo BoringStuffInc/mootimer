@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::UnixStream;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 /// JSON-RPC 2.0 Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +58,6 @@ pub enum RequestId {
 }
 
 impl Request {
-    /// Create a new request
     pub fn new(method: impl Into<String>, params: Option<Value>, id: RequestId) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -83,7 +82,6 @@ pub struct MooTimerClient {
 }
 
 impl MooTimerClient {
-    /// Create a new client
     pub fn new(socket_path: impl Into<String>) -> Self {
         Self {
             socket_path: socket_path.into(),
@@ -92,8 +90,6 @@ impl MooTimerClient {
         }
     }
 
-    /// Start a persistent connection and subscribe to notifications
-    /// Returns a receiver for timer event notifications
     pub async fn subscribe_notifications(&self) -> Result<mpsc::Receiver<Notification>> {
         let mut conn_lock = self.persistent_conn.lock().await;
 
@@ -109,7 +105,8 @@ impl MooTimerClient {
 
         // Create channels
         let (notif_tx, notif_rx) = mpsc::channel::<Notification>(100);
-        let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> = Arc::new(RwLock::new(HashMap::new()));
+        let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
 
         // Spawn background task to read messages
         let pending_clone = pending_responses.clone();
@@ -128,12 +125,12 @@ impl MooTimerClient {
                             let _ = notif_tx_clone.send(notification).await;
                         }
                         // Otherwise try as response (has id field)
-                        else if let Ok(response) = serde_json::from_str::<Response>(&line) {
-                            if let RequestId::Number(id) = response.id {
-                                let pending = pending_clone.read().await;
-                                if let Some(tx) = pending.get(&id) {
-                                    let _ = tx.send(response).await;
-                                }
+                        else if let Ok(response) = serde_json::from_str::<Response>(&line)
+                            && let RequestId::Number(id) = response.id
+                        {
+                            let pending = pending_clone.read().await;
+                            if let Some(tx) = pending.get(&id) {
+                                let _ = tx.send(response).await;
                             }
                         }
                     }
@@ -150,11 +147,24 @@ impl MooTimerClient {
         Ok(notif_rx)
     }
 
-    /// Send a request using the persistent connection (if available)
-    async fn call_persistent(&self, method: impl Into<String>, params: Option<Value>) -> Result<Value> {
+    async fn call_persistent(
+        &self,
+        method: impl Into<String>,
+        params: Option<Value>,
+    ) -> Result<Value> {
+        let method_str = method.into();
         let conn_lock = self.persistent_conn.lock().await;
 
         if let Some(conn) = conn_lock.as_ref() {
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/mootimer-client.log")
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "✅ PERSISTENT: {}", method_str)
+                });
+            let method = method_str;
             let request = Request::new(method, params, self.next_id());
             let request_id = if let RequestId::Number(id) = request.id.clone() {
                 id
@@ -181,7 +191,10 @@ impl MooTimerClient {
             }
 
             // Wait for response
-            let response = rx.recv().await.ok_or_else(|| anyhow::anyhow!("No response received"))?;
+            let response = rx
+                .recv()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("No response received"))?;
 
             // Cleanup
             {
@@ -198,12 +211,23 @@ impl MooTimerClient {
         }
 
         // Fallback to one-shot connection
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/mootimer-client.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                writeln!(f, "❌ ONE-SHOT: {}", method_str)
+            });
         drop(conn_lock);
-        self.call_oneshot(method, params).await
+        self.call_oneshot(method_str, params).await
     }
 
-    /// Send a one-shot request (creates new connection)
-    async fn call_oneshot(&self, method: impl Into<String>, params: Option<Value>) -> Result<Value> {
+    async fn call_oneshot(
+        &self,
+        method: impl Into<String>,
+        params: Option<Value>,
+    ) -> Result<Value> {
         let mut stream = self.connect().await?;
         let request = Request::new(method, params, self.next_id());
 
@@ -228,12 +252,10 @@ impl MooTimerClient {
         Ok(response.result.unwrap_or(Value::Null))
     }
 
-    /// Connect to the daemon
     async fn connect(&self) -> Result<UnixStream> {
         Ok(UnixStream::connect(&self.socket_path).await?)
     }
 
-    /// Get next request ID
     fn next_id(&self) -> RequestId {
         let id = self
             .request_counter
@@ -241,15 +263,12 @@ impl MooTimerClient {
         RequestId::Number(id)
     }
 
-    /// Send a request and receive a response
-    /// If persistent connection is active, uses it; otherwise creates one-shot connection
     pub async fn call(&self, method: impl Into<String>, params: Option<Value>) -> Result<Value> {
         self.call_persistent(method, params).await
     }
 
     // Timer methods
 
-    /// Start a manual timer
     pub async fn timer_start_manual(
         &self,
         profile_id: &str,
@@ -265,7 +284,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Start a pomodoro timer
     pub async fn timer_start_pomodoro(
         &self,
         profile_id: &str,
@@ -277,20 +295,16 @@ impl MooTimerClient {
             "task_id": task_id,
         });
 
-        // If custom duration provided, create config with it
+        // If custom duration provided, create config override with JUST that field
         if let Some(duration) = work_duration_minutes {
             params["config"] = serde_json::json!({
                 "work_duration": duration * 60, // Convert minutes to seconds
-                "short_break": 300,  // 5 minutes
-                "long_break": 900,   // 15 minutes
-                "sessions_until_long_break": 4,
             });
         }
 
         self.call("timer.start_pomodoro", Some(params)).await
     }
 
-    /// Start a countdown timer
     pub async fn timer_start_countdown(
         &self,
         profile_id: &str,
@@ -308,7 +322,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Pause timer
     pub async fn timer_pause(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "timer.pause",
@@ -319,7 +332,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Resume timer
     pub async fn timer_resume(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "timer.resume",
@@ -330,7 +342,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Stop timer
     pub async fn timer_stop(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "timer.stop",
@@ -341,7 +352,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Cancel timer
     pub async fn timer_cancel(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "timer.cancel",
@@ -352,7 +362,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Get timer status
     pub async fn timer_get(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "timer.get",
@@ -363,14 +372,12 @@ impl MooTimerClient {
         .await
     }
 
-    /// List all active timers
     pub async fn timer_list(&self) -> Result<Value> {
         self.call("timer.list", None).await
     }
 
     // Profile methods
 
-    /// Create a profile
     pub async fn profile_create(
         &self,
         id: &str,
@@ -388,7 +395,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Get a profile
     pub async fn profile_get(&self, id: &str) -> Result<Value> {
         self.call(
             "profile.get",
@@ -399,12 +405,10 @@ impl MooTimerClient {
         .await
     }
 
-    /// List all profiles
     pub async fn profile_list(&self) -> Result<Value> {
         self.call("profile.list", None).await
     }
 
-    /// Delete a profile
     pub async fn profile_delete(&self, id: &str) -> Result<Value> {
         self.call(
             "profile.delete",
@@ -415,7 +419,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Update a profile
     pub async fn profile_update(&self, profile: Value) -> Result<Value> {
         self.call(
             "profile.update",
@@ -428,7 +431,6 @@ impl MooTimerClient {
 
     // Task methods
 
-    /// Create a task
     pub async fn task_create(
         &self,
         profile_id: &str,
@@ -446,7 +448,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// List tasks for a profile
     pub async fn task_list(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "task.list",
@@ -457,9 +458,72 @@ impl MooTimerClient {
         .await
     }
 
+    pub async fn task_get(&self, profile_id: &str, task_id: &str) -> Result<Value> {
+        self.call(
+            "task.get",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "task_id": task_id,
+            })),
+        )
+        .await
+    }
+
+    pub async fn task_update(&self, profile_id: &str, task: Value) -> Result<Value> {
+        self.call(
+            "task.update",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "task": task,
+            })),
+        )
+        .await
+    }
+
+    pub async fn task_delete(&self, profile_id: &str, task_id: &str) -> Result<Value> {
+        self.call(
+            "task.delete",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "task_id": task_id,
+            })),
+        )
+        .await
+    }
+
     // Entry methods
 
-    /// Get today's entries
+    pub async fn entry_list(&self, profile_id: &str) -> Result<Value> {
+        self.call(
+            "entry.list",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+            })),
+        )
+        .await
+    }
+
+    pub async fn entry_filter(
+        &self,
+        profile_id: &str,
+        start_date: Option<String>,
+        end_date: Option<String>,
+        task_id: Option<&str>,
+        tags: Option<Vec<String>>,
+    ) -> Result<Value> {
+        self.call(
+            "entry.filter",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "task_id": task_id,
+                "tags": tags,
+            })),
+        )
+        .await
+    }
+
     pub async fn entry_today(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "entry.today",
@@ -470,7 +534,6 @@ impl MooTimerClient {
         .await
     }
 
-    /// Get today's stats
     pub async fn entry_stats_today(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "entry.stats_today",
@@ -481,14 +544,34 @@ impl MooTimerClient {
         .await
     }
 
+    pub async fn entry_delete(&self, profile_id: &str, entry_id: &str) -> Result<Value> {
+        self.call(
+            "entry.delete",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "entry_id": entry_id,
+            })),
+        )
+        .await
+    }
+
+    pub async fn entry_update(&self, profile_id: &str, entry: Value) -> Result<Value> {
+        self.call(
+            "entry.update",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "entry": entry,
+            })),
+        )
+        .await
+    }
+
     // Sync methods
 
-    /// Get sync status
     pub async fn sync_status(&self) -> Result<Value> {
         self.call("sync.status", None).await
     }
 
-    /// Perform sync
     pub async fn sync_sync(&self) -> Result<Value> {
         self.call("sync.sync", None).await
     }

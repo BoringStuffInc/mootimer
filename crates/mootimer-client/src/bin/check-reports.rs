@@ -2,8 +2,10 @@ use mootimer_client::MooTimerClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("XDG_DATA_HOME", "/tmp/mootimer-report-test/.local/share");
-    std::env::set_var("XDG_CONFIG_HOME", "/tmp/mootimer-report-test/.config");
+    unsafe {
+        std::env::set_var("XDG_DATA_HOME", "/tmp/mootimer-report-test/.local/share");
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/mootimer-report-test/.config");
+    }
 
     let client = MooTimerClient::new("/tmp/mootimer-report.sock");
 

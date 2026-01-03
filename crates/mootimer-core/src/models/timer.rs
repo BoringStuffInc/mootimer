@@ -15,6 +15,9 @@ pub struct ActiveTimer {
     pub start_time: DateTime<Utc>,
     pub pause_time: Option<DateTime<Utc>>,
     pub elapsed_seconds: u64,
+    /// Accumulated work time (excluding current session if running)
+    #[serde(default)]
+    pub accumulated_work_time: u64,
     pub pomodoro_state: Option<PomodoroState>,
     pub target_duration: Option<u64>, // For countdown timers (in seconds)
 }
@@ -54,6 +57,7 @@ impl ActiveTimer {
             start_time: Utc::now(),
             pause_time: None,
             elapsed_seconds: 0,
+            accumulated_work_time: 0,
             pomodoro_state: None,
             target_duration: None,
         }
@@ -74,6 +78,7 @@ impl ActiveTimer {
             start_time: now,
             pause_time: None,
             elapsed_seconds: 0,
+            accumulated_work_time: 0,
             pomodoro_state: Some(PomodoroState {
                 config,
                 current_session: 1,
@@ -98,6 +103,7 @@ impl ActiveTimer {
             start_time: Utc::now(),
             pause_time: None,
             elapsed_seconds: 0,
+            accumulated_work_time: 0,
             pomodoro_state: None,
             target_duration: Some(duration_minutes * 60),
         }
@@ -146,24 +152,60 @@ impl ActiveTimer {
         self.state = TimerState::Stopped;
     }
 
-    /// Get current elapsed time in seconds
+    /// Get current elapsed time in seconds (Work Time)
     pub fn current_elapsed(&self) -> u64 {
-        match self.state {
-            TimerState::Running => Utc::now()
-                .signed_duration_since(self.start_time)
-                .num_seconds()
-                .max(0) as u64,
-            TimerState::Paused => {
-                if let Some(pause_time) = self.pause_time {
-                    pause_time
+        match self.mode {
+            TimerMode::Pomodoro => {
+                let mut total = self.accumulated_work_time;
+
+                // If currently in Work phase, add current session duration
+                if let Some(ref pomo) = self.pomodoro_state
+                    && pomo.phase.is_work()
+                    && self.state != TimerState::Stopped
+                {
+                    total += self.current_phase_elapsed();
+                }
+
+                total
+            }
+            _ => {
+                // Manual/Countdown: Simple start time diff
+                match self.state {
+                    TimerState::Running => Utc::now()
                         .signed_duration_since(self.start_time)
                         .num_seconds()
-                        .max(0) as u64
-                } else {
-                    self.elapsed_seconds
+                        .max(0) as u64,
+                    TimerState::Paused => {
+                        if let Some(pause_time) = self.pause_time {
+                            pause_time
+                                .signed_duration_since(self.start_time)
+                                .num_seconds()
+                                .max(0) as u64
+                        } else {
+                            self.elapsed_seconds
+                        }
+                    }
+                    TimerState::Stopped => self.elapsed_seconds,
                 }
             }
-            TimerState::Stopped => self.elapsed_seconds,
+        }
+    }
+
+    /// Get time elapsed in current phase (for UI / Pomodoro logic)
+    pub fn current_phase_elapsed(&self) -> u64 {
+        if let Some(ref pomo) = self.pomodoro_state {
+            let end_time = if self.state == TimerState::Paused {
+                self.pause_time.unwrap_or_else(Utc::now)
+            } else {
+                Utc::now()
+            };
+
+            end_time
+                .signed_duration_since(pomo.phase_start_time)
+                .num_seconds()
+                .max(0) as u64
+        } else {
+            self.current_elapsed()
         }
     }
 
@@ -171,10 +213,7 @@ impl ActiveTimer {
     pub fn remaining_seconds(&self) -> Option<u64> {
         if let Some(ref pomo) = self.pomodoro_state {
             let phase_duration = pomo.phase.duration(&pomo.config);
-            let phase_elapsed = Utc::now()
-                .signed_duration_since(pomo.phase_start_time)
-                .num_seconds()
-                .max(0) as u64;
+            let phase_elapsed = self.current_phase_elapsed();
 
             Some(phase_duration.saturating_sub(phase_elapsed))
         } else {
@@ -196,6 +235,15 @@ impl ActiveTimer {
             .pomodoro_state
             .as_mut()
             .ok_or_else(|| Error::InvalidData("Not a pomodoro timer".to_string()))?;
+
+        // If completing a Work phase, add to accumulated_work_time
+        if pomo.phase.is_work() {
+            // We assume next_phase is called when phase is complete, i.e., elapsed == duration
+            // But to be safe and accurate, we calculate it based on duration or actual elapsed?
+            // Since we are switching precisely when it ends (triggered by tick), we can use duration.
+            let duration = pomo.phase.duration(&pomo.config);
+            self.accumulated_work_time += duration;
+        }
 
         let (next_phase, next_session) = match pomo.phase {
             PomodoroPhase::Work => {
@@ -355,6 +403,7 @@ mod tests {
             short_break: 1,
             long_break: 1,
             sessions_until_long_break: 2,
+            countdown_default: 0,
         };
 
         let mut timer = ActiveTimer::new_pomodoro("test".to_string(), None, config);

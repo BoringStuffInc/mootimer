@@ -2,12 +2,13 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 use mootimer_core::models::{ActiveTimer, Entry, PomodoroConfig};
 
 use super::engine::{TimerEngine, TimerEngineError};
 use super::events::TimerEvent;
+use crate::event_manager::EventManager;
 
 /// Timer manager error
 #[derive(Debug, thiserror::Error)]
@@ -29,7 +30,9 @@ pub type Result<T> = std::result::Result<T, TimerManagerError>;
 pub struct TimerManager {
     /// Active timers indexed by profile_id
     timers: Arc<RwLock<HashMap<String, Arc<TimerEngine>>>>,
-    /// Event broadcast channel
+    /// Event manager for broadcasting events
+    event_manager: Arc<EventManager>,
+    /// Event broadcast channel (for TimerEngine compatibility)
     event_tx: broadcast::Sender<TimerEvent>,
     /// Completed entries from auto-stopped timers (countdown)
     completed_entries: Arc<RwLock<Vec<(String, Entry)>>>,
@@ -37,13 +40,22 @@ pub struct TimerManager {
 
 impl TimerManager {
     /// Create a new timer manager
-    pub fn new() -> Self {
-        let (event_tx, _) = broadcast::channel(1000);
+    pub fn new(event_manager: Arc<EventManager>) -> Self {
+        let (event_tx, mut event_rx) = broadcast::channel(1000);
         let timers = Arc::new(RwLock::new(HashMap::new()));
         let completed_entries = Arc::new(RwLock::new(Vec::new()));
 
+        // Spawn task to forward timer events to the event manager
+        let event_manager_clone = event_manager.clone();
+        tokio::spawn(async move {
+            while let Ok(timer_event) = event_rx.recv().await {
+                event_manager_clone.emit_timer(timer_event);
+            }
+        });
+
         Self {
             timers,
+            event_manager,
             event_tx,
             completed_entries,
         }
@@ -62,7 +74,7 @@ impl TimerManager {
         profile_id: String,
     ) {
         tracing::info!("handle_countdown_completion called for {}", profile_id);
-        
+
         // Remove from active timers
         tracing::debug!("Acquiring write lock on timers HashMap");
         let engine = {
@@ -82,7 +94,10 @@ impl TimerManager {
                 chrono::Utc::now(),
                 timer.mode,
             ) {
-                tracing::info!("Countdown completed for profile {}, creating entry", profile_id);
+                tracing::info!(
+                    "Countdown completed for profile {}, creating entry",
+                    profile_id
+                );
                 tracing::debug!("Acquiring write lock on completed_entries");
                 let mut entries = completed_entries.write().await;
                 tracing::debug!("Got write lock on completed_entries");
@@ -92,8 +107,10 @@ impl TimerManager {
         tracing::info!("handle_countdown_completion finished for profile");
     }
 
-    /// Subscribe to timer events
+    /// Subscribe to timer events (delegates to event manager)
     pub fn subscribe(&self) -> broadcast::Receiver<TimerEvent> {
+        // For backward compatibility, still return a TimerEvent receiver
+        // The event manager will handle broadcasting as DaemonEvent
         self.event_tx.subscribe()
     }
 
@@ -127,6 +144,7 @@ impl TimerManager {
             task_id,
             mootimer_core::models::TimerMode::Manual,
         );
+        self.event_manager.emit_timer(event.clone());
         let _ = self.event_tx.send(event);
 
         // Start tick loop
@@ -176,6 +194,7 @@ impl TimerManager {
             task_id,
             mootimer_core::models::TimerMode::Pomodoro,
         );
+        self.event_manager.emit_timer(event.clone());
         let _ = self.event_tx.send(event);
 
         // Start tick loop
@@ -225,6 +244,7 @@ impl TimerManager {
             task_id,
             mootimer_core::models::TimerMode::Countdown,
         );
+        self.event_manager.emit_timer(event.clone());
         let _ = self.event_tx.send(event);
 
         // Start tick loop with completion handler
@@ -239,7 +259,8 @@ impl TimerManager {
                 timers_clone,
                 completed_entries_clone,
                 profile_id_clone,
-            ).await;
+            )
+            .await;
         });
 
         // Store timer
@@ -353,18 +374,24 @@ impl TimerManager {
 
 impl Default for TimerManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(Arc::new(crate::event_manager::EventManager::new()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{sleep, Duration};
+    use crate::event_manager::EventManager;
+    use tokio::time::{Duration, sleep};
+
+    fn create_manager() -> TimerManager {
+        let event_manager = Arc::new(EventManager::new());
+        TimerManager::new(event_manager)
+    }
 
     #[tokio::test]
     async fn test_start_manual_timer() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
 
         let timer_id = manager
             .start_manual("profile1".to_string(), Some("task1".to_string()))
@@ -378,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cannot_start_multiple_timers_for_profile() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
 
         manager
             .start_manual("profile1".to_string(), None)
@@ -391,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pause_resume() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
 
         manager
             .start_manual("profile1".to_string(), None)
@@ -409,7 +436,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_removes_timer() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
 
         manager
             .start_manual("profile1".to_string(), Some("task1".to_string()))
@@ -425,7 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_profiles() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
 
         manager
             .start_manual("profile1".to_string(), None)
@@ -446,7 +473,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_timer_events() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
         let mut rx = manager.subscribe();
 
         manager
@@ -466,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pomodoro_timer() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
         let config = PomodoroConfig::default();
 
         manager
@@ -480,7 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_countdown_completion_doesnt_deadlock() {
-        let manager = TimerManager::new();
+        let manager = create_manager();
         let mut rx = manager.subscribe();
 
         // Start a 1-second countdown
@@ -494,8 +521,9 @@ mod tests {
         let mut countdown_completed = false;
         let mut timer_stopped = false;
         let start = std::time::Instant::now();
-        
-        while start.elapsed() < Duration::from_secs(70) {  // 1 minute countdown + buffer
+
+        while start.elapsed() < Duration::from_secs(70) {
+            // 1 minute countdown + buffer
             match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
                 Ok(Ok(event)) => {
                     tracing::debug!("Received event: {:?}", event.event_type);
@@ -511,7 +539,7 @@ mod tests {
                 }
                 _ => {}
             }
-            
+
             if countdown_completed && timer_stopped {
                 break;
             }
@@ -520,13 +548,19 @@ mod tests {
         // After completion, the timer should be removed (with some tolerance for timing)
         sleep(Duration::from_millis(500)).await;
         let result = manager.get_timer("profile1").await;
-        
+
         if countdown_completed && timer_stopped {
-            assert!(result.is_err(), "Timer should be removed after countdown completion");
+            assert!(
+                result.is_err(),
+                "Timer should be removed after countdown completion"
+            );
         } else {
             // If we didn't see the events, at least verify get_timer works without deadlocking
             match result {
-                Ok(timer) => tracing::debug!("Timer still active after {} seconds", start.elapsed().as_secs()),
+                Ok(timer) => tracing::debug!(
+                    "Timer still active after {} seconds",
+                    start.elapsed().as_secs()
+                ),
                 Err(_) => tracing::debug!("Timer was completed and removed"),
             }
         }

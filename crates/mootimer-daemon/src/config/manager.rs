@@ -4,9 +4,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use mootimer_core::{
-    models::Config,
-    storage::{init_config_dir, ConfigStorage},
     Result as CoreResult,
+    models::Config,
+    storage::{ConfigStorage, init_config_dir},
 };
 
 /// Config manager error
@@ -28,7 +28,6 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
-    /// Create a new config manager
     pub fn new() -> CoreResult<Self> {
         let config_dir = init_config_dir()?;
         let storage = ConfigStorage::new(config_dir);
@@ -42,12 +41,10 @@ impl ConfigManager {
         })
     }
 
-    /// Get the current configuration
     pub async fn get(&self) -> Config {
         self.config.read().await.clone()
     }
 
-    /// Update the configuration
     pub async fn update(&self, config: Config) -> Result<Config> {
         // Validate config
         config
@@ -66,14 +63,12 @@ impl ConfigManager {
         Ok(config)
     }
 
-    /// Update default profile
     pub async fn set_default_profile(&self, profile_id: Option<String>) -> Result<Config> {
         let mut config = self.get().await;
         config.default_profile = profile_id;
         self.update(config).await
     }
 
-    /// Update daemon config
     pub async fn update_daemon_config(
         &self,
         socket_path: Option<String>,
@@ -92,13 +87,13 @@ impl ConfigManager {
         self.update(config).await
     }
 
-    /// Update pomodoro config
     pub async fn update_pomodoro_config(
         &self,
         work_duration: Option<u64>,
         short_break: Option<u64>,
         long_break: Option<u64>,
         sessions_until_long_break: Option<u32>,
+        countdown_default: Option<u64>,
     ) -> Result<Config> {
         let mut config = self.get().await;
 
@@ -118,10 +113,13 @@ impl ConfigManager {
             config.pomodoro.sessions_until_long_break = sessions;
         }
 
+        if let Some(duration) = countdown_default {
+            config.pomodoro.countdown_default = duration;
+        }
+
         self.update(config).await
     }
 
-    /// Update sync config
     pub async fn update_sync_config(
         &self,
         auto_commit: Option<bool>,
@@ -145,7 +143,6 @@ impl ConfigManager {
         self.update(config).await
     }
 
-    /// Reset to default configuration
     pub async fn reset_to_default(&self) -> Result<Config> {
         let config = Config::default();
         self.update(config).await
@@ -187,6 +184,7 @@ mod tests {
         let updated = manager
             .update_pomodoro_config(
                 Some(1800), // 30 minutes
+                None,
                 None,
                 None,
                 None,

@@ -79,24 +79,47 @@ impl IpcServer {
         let mut reader = tokio::io::BufReader::new(read_half);
         let mut writer = tokio::io::BufWriter::new(write_half);
 
-        // Subscribe to timer events
+        // Subscribe to all daemon events
         let mut event_rx = self.api_handler.subscribe_events();
 
-        // Spawn task to forward timer events as notifications to client
+        // Spawn task to forward daemon events as notifications to client
         let (notif_tx, mut notif_rx) = mpsc::channel::<Notification>(100);
         tokio::spawn(async move {
+            tracing::info!("IPC: Event forwarder task started");
             while let Ok(event) = event_rx.recv().await {
-                // Convert TimerEvent to Notification
+                // Convert DaemonEvent to Notification with appropriate method
+                use crate::events::DaemonEvent;
+                let (method, params) = match &event {
+                    DaemonEvent::Timer(e) => {
+                        tracing::debug!("IPC: Forwarding timer event");
+                        ("timer.event", serde_json::to_value(e))
+                    }
+                    DaemonEvent::Task(e) => {
+                        tracing::info!("IPC: Forwarding task event to client");
+                        ("task.event", serde_json::to_value(e))
+                    }
+                    DaemonEvent::Entry(e) => {
+                        tracing::debug!("IPC: Forwarding entry event");
+                        ("entry.event", serde_json::to_value(e))
+                    }
+                    DaemonEvent::Profile(e) => {
+                        tracing::debug!("IPC: Forwarding profile event");
+                        ("profile.event", serde_json::to_value(e))
+                    }
+                };
+
                 let notification = Notification {
                     jsonrpc: "2.0".to_string(),
-                    method: "timer.event".to_string(),
-                    params: serde_json::to_value(&event).unwrap_or(serde_json::Value::Null),
+                    method: method.to_string(),
+                    params: params.unwrap_or(serde_json::Value::Null),
                 };
 
                 if notif_tx.send(notification).await.is_err() {
+                    tracing::info!("IPC: Event forwarder stopping - client disconnected");
                     break; // Client disconnected
                 }
             }
+            tracing::info!("IPC: Event forwarder task stopped");
         });
 
         // Handle both requests and notifications using select!
@@ -125,10 +148,12 @@ impl IpcServer {
                 }
                 // Forward notifications to client
                 Some(notification) = notif_rx.recv() => {
+                    tracing::info!("IPC: Sending notification to client: {}", notification.method);
                     if let Err(e) = Self::write_notification_to(&mut writer, &notification).await {
                         tracing::warn!("Failed to send notification: {}", e);
                         break;
                     }
+                    tracing::info!("IPC: Notification sent successfully");
                 }
             }
         }
@@ -137,7 +162,9 @@ impl IpcServer {
     }
 
     /// Read a request from the reader
-    async fn read_request_from(reader: &mut tokio::io::BufReader<tokio::io::ReadHalf<UnixStream>>) -> Result<Request> {
+    async fn read_request_from(
+        reader: &mut tokio::io::BufReader<tokio::io::ReadHalf<UnixStream>>,
+    ) -> Result<Request> {
         use tokio::io::AsyncBufReadExt;
 
         let mut line = String::new();
@@ -152,7 +179,10 @@ impl IpcServer {
     }
 
     /// Write a response to the writer
-    async fn write_response_to(writer: &mut tokio::io::BufWriter<tokio::io::WriteHalf<UnixStream>>, response: &Response) -> Result<()> {
+    async fn write_response_to(
+        writer: &mut tokio::io::BufWriter<tokio::io::WriteHalf<UnixStream>>,
+        response: &Response,
+    ) -> Result<()> {
         use tokio::io::AsyncWriteExt;
 
         let json = serde_json::to_string(response)?;
@@ -163,7 +193,10 @@ impl IpcServer {
     }
 
     /// Write a notification to the writer
-    async fn write_notification_to(writer: &mut tokio::io::BufWriter<tokio::io::WriteHalf<UnixStream>>, notification: &Notification) -> Result<()> {
+    async fn write_notification_to(
+        writer: &mut tokio::io::BufWriter<tokio::io::WriteHalf<UnixStream>>,
+        notification: &Notification,
+    ) -> Result<()> {
         use tokio::io::AsyncWriteExt;
 
         let json = serde_json::to_string(notification)?;
@@ -198,6 +231,7 @@ impl IpcServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_manager::EventManager;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -210,13 +244,24 @@ mod tests {
             .unwrap()
             .to_string();
 
+        let event_manager = Arc::new(EventManager::new());
+        let timer_manager = Arc::new(crate::timer::TimerManager::new(event_manager.clone()));
+        let profile_manager =
+            Arc::new(crate::profile::ProfileManager::new(event_manager.clone()).unwrap());
+        let task_manager = Arc::new(crate::task::TaskManager::new(event_manager.clone()).unwrap());
+        let entry_manager =
+            Arc::new(crate::entry::EntryManager::new(event_manager.clone()).unwrap());
+        let config_manager = Arc::new(crate::config::ConfigManager::new().unwrap());
+        let sync_manager = Arc::new(crate::sync::SyncManager::new().unwrap());
+
         let api_handler = Arc::new(ApiHandler::new(
-            crate::timer::TimerManager::new(),
-            crate::profile::ProfileManager::new().unwrap(),
-            crate::task::TaskManager::new().unwrap(),
-            crate::entry::EntryManager::new().unwrap(),
-            crate::config::ConfigManager::new().unwrap(),
-            crate::sync::SyncManager::new().unwrap(),
+            event_manager,
+            timer_manager,
+            profile_manager,
+            task_manager,
+            entry_manager,
+            config_manager,
+            sync_manager,
         ));
 
         let _server = IpcServer::new(socket_path, api_handler);

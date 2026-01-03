@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use mootimer_core::{
-    git::GitOperations, models::SyncConfig, storage::init_data_dir, Result as CoreResult,
+    Result as CoreResult, git::GitOperations, models::SyncConfig, storage::init_data_dir,
 };
 
 /// Sync manager error
@@ -30,7 +30,6 @@ pub struct SyncManager {
 }
 
 impl SyncManager {
-    /// Create a new sync manager
     pub fn new() -> CoreResult<Self> {
         let data_dir = init_data_dir()?;
         let git_ops = GitOperations::new(data_dir);
@@ -40,7 +39,6 @@ impl SyncManager {
         })
     }
 
-    /// Initialize the git repository
     pub async fn init_repo(&self) -> Result<()> {
         let git_ops = self.git_ops.clone();
         tokio::task::spawn_blocking(move || git_ops.init())
@@ -49,7 +47,6 @@ impl SyncManager {
         Ok(())
     }
 
-    /// Check if git repository is initialized
     pub async fn is_initialized(&self) -> bool {
         let git_ops = self.git_ops.clone();
         tokio::task::spawn_blocking(move || git_ops.is_initialized())
@@ -57,7 +54,6 @@ impl SyncManager {
             .unwrap_or(false)
     }
 
-    /// Auto-commit changes if there are any
     pub async fn auto_commit(&self, message: &str) -> Result<Option<String>> {
         let git_ops = self.git_ops.clone();
         let message = message.to_string();
@@ -87,13 +83,11 @@ impl SyncManager {
         .map_err(|e| SyncManagerError::JoinError(e.to_string()))?
     }
 
-    /// Sync with remote (pull + push)
     pub async fn sync(&self, config: &SyncConfig) -> Result<SyncResult> {
         let git_ops = self.git_ops.clone();
-        let remote_url = config
-            .remote_url
-            .clone()
-            .ok_or_else(|| SyncManagerError::NotConfigured("Remote URL not configured".to_string()))?;
+        let remote_url = config.remote_url.clone().ok_or_else(|| {
+            SyncManagerError::NotConfigured("Remote URL not configured".to_string())
+        })?;
         let auto_push = config.auto_push;
 
         tokio::task::spawn_blocking(move || {
@@ -142,7 +136,6 @@ impl SyncManager {
         .map_err(|e| SyncManagerError::JoinError(e.to_string()))?
     }
 
-    /// Get the sync status (commits ahead/behind remote)
     pub async fn get_status(&self, config: &SyncConfig) -> Result<SyncStatus> {
         let git_ops = self.git_ops.clone();
         let remote_url = config.remote_url.clone();
@@ -187,7 +180,6 @@ impl SyncManager {
         .map_err(|e| SyncManagerError::JoinError(e.to_string()))?
     }
 
-    /// Configure remote repository
     pub async fn set_remote(&self, url: &str) -> Result<()> {
         let git_ops = self.git_ops.clone();
         let url = url.to_string();

@@ -3,8 +3,8 @@
 use chrono::Utc;
 use mootimer_core::models::{ActiveTimer, Entry, PomodoroConfig};
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use tokio::time::{interval, Duration};
+use tokio::sync::{RwLock, broadcast};
+use tokio::time::{Duration, interval};
 
 use super::events::{TimerEvent, TimerEventType};
 
@@ -119,7 +119,7 @@ impl TimerEngine {
             let elapsed = timer.current_elapsed();
             let remaining = timer.remaining_seconds();
             let profile_id = timer.profile_id.clone();
-            let timer_id = profile_id.clone(); // TODO: Use actual timer ID
+            let timer_id = profile_id.clone();
 
             drop(timer); // Release read lock before emitting event
 
@@ -191,7 +191,12 @@ impl TimerEngine {
                 let elapsed = timer.current_elapsed();
                 drop(timer);
 
-                tracing::info!("Countdown completed for {}, elapsed={} target={}", countdown_profile, elapsed, target);
+                tracing::info!(
+                    "Countdown completed for {}, elapsed={} target={}",
+                    countdown_profile,
+                    elapsed,
+                    target
+                );
 
                 // Emit countdown completed event
                 let event = TimerEvent::new(
@@ -211,11 +216,8 @@ impl TimerEngine {
                 tracing::debug!("Released write lock");
 
                 // Emit stopped event so manager can clean up
-                let stopped_event = TimerEvent::stopped(
-                    countdown_profile,
-                    countdown_timer_id,
-                    duration,
-                );
+                let stopped_event =
+                    TimerEvent::stopped(countdown_profile, countdown_timer_id, duration);
                 let _ = self.event_tx.send(stopped_event);
 
                 tracing::info!("Countdown tick loop breaking");
@@ -237,7 +239,7 @@ impl TimerEngine {
                 elapsed_seconds: elapsed,
             },
             timer.profile_id.clone(),
-            timer.profile_id.clone(), // TODO: Use actual timer ID
+            timer.profile_id.clone(),
         );
         let _ = self.event_tx.send(event);
 
@@ -252,7 +254,7 @@ impl TimerEngine {
         let event = TimerEvent::new(
             TimerEventType::Resumed,
             timer.profile_id.clone(),
-            timer.profile_id.clone(), // TODO: Use actual timer ID
+            timer.profile_id.clone(),
         );
         let _ = self.event_tx.send(event);
 
@@ -274,11 +276,8 @@ impl TimerEngine {
             timer.mode,
         )?;
 
-        let event = TimerEvent::stopped(
-            timer.profile_id.clone(),
-            timer.profile_id.clone(), // TODO: Use actual timer ID
-            duration,
-        );
+        let event =
+            TimerEvent::stopped(timer.profile_id.clone(), timer.profile_id.clone(), duration);
         let _ = self.event_tx.send(event);
 
         Ok(entry)
@@ -292,7 +291,7 @@ impl TimerEngine {
         let event = TimerEvent::new(
             TimerEventType::Cancelled,
             timer.profile_id.clone(),
-            timer.profile_id.clone(), // TODO: Use actual timer ID
+            timer.profile_id.clone(),
         );
         let _ = self.event_tx.send(event);
 
@@ -404,31 +403,25 @@ mod tests {
         sleep(Duration::from_millis(100)).await;
 
         // Try to get timer while tick loop is running (this should not deadlock)
-        let timer_result = tokio::time::timeout(
-            Duration::from_secs(5),
-            engine.get_timer(),
-        ).await;
+        let timer_result = tokio::time::timeout(Duration::from_secs(5), engine.get_timer()).await;
 
-        assert!(timer_result.is_ok(), "get_timer should not timeout/deadlock");
+        assert!(
+            timer_result.is_ok(),
+            "get_timer should not timeout/deadlock"
+        );
         let timer = timer_result.unwrap();
         assert_eq!(timer.mode, mootimer_core::models::TimerMode::Countdown);
 
         // Try multiple times
         for _ in 0..5 {
             sleep(Duration::from_millis(50)).await;
-            let result = tokio::time::timeout(
-                Duration::from_secs(5),
-                engine.get_timer(),
-            ).await;
+            let result = tokio::time::timeout(Duration::from_secs(5), engine.get_timer()).await;
             assert!(result.is_ok(), "get_timer should not deadlock");
         }
 
         // Clean up - cancel the timer to stop the tick loop
         engine.cancel().await.unwrap();
-        
-        let _ = tokio::time::timeout(
-            Duration::from_secs(5),
-            tick_task,
-        ).await;
+
+        let _ = tokio::time::timeout(Duration::from_secs(5), tick_task).await;
     }
 }

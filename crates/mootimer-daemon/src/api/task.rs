@@ -1,7 +1,7 @@
 //! Task API methods
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{ApiError, Result};
@@ -140,30 +140,42 @@ pub async fn search(manager: &Arc<TaskManager>, params: Option<Value>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_manager::EventManager;
+    use std::sync::Arc;
 
     const TEST_PROFILE: &str = "test_task_api";
 
     #[tokio::test]
-    async fn test_create_task() {
-        let manager = Arc::new(TaskManager::new().unwrap());
+    async fn test_create_and_get_task() {
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(TaskManager::new(event_manager).unwrap());
 
         let params = json!({
             "profile_id": TEST_PROFILE,
-            "title": "Test Task"
+            "title": "Test API Task"
         });
 
         let result = create(&manager, Some(params)).await.unwrap();
-        assert!(result.get("id").is_some());
+        let task_id = result.get("id").unwrap().as_str().unwrap().to_string();
+
+        let get_params = json!({
+            "profile_id": TEST_PROFILE,
+            "task_id": task_id
+        });
+
+        let get_result = get(&manager, Some(get_params)).await.unwrap();
+        assert_eq!(
+            get_result.get("title").unwrap().as_str().unwrap(),
+            "Test API Task"
+        );
     }
 
     #[tokio::test]
     async fn test_list_tasks() {
-        let manager = Arc::new(TaskManager::new().unwrap());
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(TaskManager::new(event_manager).unwrap());
 
-        let params = json!({
-            "profile_id": TEST_PROFILE
-        });
-
+        let params = json!({ "profile_id": TEST_PROFILE });
         let result = list(&manager, Some(params)).await.unwrap();
         assert!(result.is_array());
     }

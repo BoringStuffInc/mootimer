@@ -2,8 +2,10 @@ use mootimer_client::MooTimerClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::env::set_var("XDG_DATA_HOME", "/tmp/mootimer-report-test/.local/share");
-    std::env::set_var("XDG_CONFIG_HOME", "/tmp/mootimer-report-test/.config");
+    unsafe {
+        std::env::set_var("XDG_DATA_HOME", "/tmp/mootimer-report-test/.local/share");
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/mootimer-report-test/.config");
+    }
 
     let client = MooTimerClient::new("/tmp/mootimer-report.sock");
 
@@ -109,7 +111,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Test Data Created Successfully ===");
     println!("\nNow you can:");
-    println!("  1. Run the TUI: ./target/release/mootimer --socket /tmp/mootimer-report.sock --profile test");
+    println!(
+        "  1. Run the TUI: ./target/release/mootimer --socket /tmp/mootimer-report.sock --profile test"
+    );
     println!("  2. Navigate to Reports view (press '4')");
     println!("  3. See the task breakdown!\n");
 

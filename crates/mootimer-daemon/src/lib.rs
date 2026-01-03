@@ -5,6 +5,8 @@
 pub mod api;
 pub mod config;
 pub mod entry;
+pub mod event_manager;
+pub mod events;
 pub mod ipc;
 pub mod profile;
 pub mod sync;
@@ -14,6 +16,8 @@ pub mod timer;
 pub use api::ApiHandler;
 pub use config::ConfigManager;
 pub use entry::EntryManager;
+pub use event_manager::EventManager;
+pub use events::{DaemonEvent, EntryEvent, ProfileEvent, TaskEvent};
 pub use ipc::{IpcServer, Notification, Request, Response};
 pub use profile::ProfileManager;
 pub use sync::SyncManager;

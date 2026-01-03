@@ -7,11 +7,13 @@ async fn main() -> anyhow::Result<()> {
     let client = MooTimerClient::new("/tmp/mootimer.sock");
 
     println!("=== Countdown Completion Test ===\n");
-    
+
     // Start a very short countdown (2 minutes) so it completes quickly
     println!("Starting 2-minute countdown timer...");
     let start = Instant::now();
-    let result = client.timer_start_countdown("test_profile", None, 2).await?;
+    let result = client
+        .timer_start_countdown("test_profile", None, 2)
+        .await?;
     println!("✓ Timer started: {:?}\n", result);
 
     // Poll the timer status every 0.5 seconds until it completes
@@ -47,12 +49,7 @@ async fn main() -> anyhow::Result<()> {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
 
-                let remaining = if target > elapsed_secs {
-                    target - elapsed_secs
-                } else {
-                    0
-                };
-
+                let remaining = target.saturating_sub(elapsed_secs);
                 print!("        state={}", state);
                 print!(", elapsed={}", elapsed_secs);
                 print!(", remaining={}s", remaining);
@@ -94,7 +91,10 @@ async fn main() -> anyhow::Result<()> {
         }
 
         if elapsed > timeout {
-            println!("\n✗ Test timeout - timer didn't complete within {} seconds", timeout.as_secs());
+            println!(
+                "\n✗ Test timeout - timer didn't complete within {} seconds",
+                timeout.as_secs()
+            );
             return Err(anyhow::anyhow!("Test timeout"));
         }
     }

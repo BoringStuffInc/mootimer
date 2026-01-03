@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{ApiError, Result};
@@ -26,6 +26,46 @@ struct FilterEntriesParams {
 #[derive(Debug, Deserialize)]
 struct StatsParams {
     profile_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteEntryParams {
+    profile_id: String,
+    entry_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateEntryParams {
+    profile_id: String,
+    entry: mootimer_core::models::Entry,
+}
+
+/// Delete an entry
+pub async fn delete(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
+    let params: DeleteEntryParams = serde_json::from_value(
+        params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
+    )?;
+
+    manager
+        .delete(&params.profile_id, &params.entry_id)
+        .await
+        .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
+
+    Ok(json!({ "status": "deleted", "id": params.entry_id }))
+}
+
+/// Update an entry
+pub async fn update(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
+    let params: UpdateEntryParams = serde_json::from_value(
+        params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
+    )?;
+
+    manager
+        .update(&params.profile_id, params.entry)
+        .await
+        .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
+
+    Ok(json!({ "status": "updated" }))
 }
 
 /// List all entries for a profile
@@ -267,12 +307,15 @@ pub async fn get_month_all_profiles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_manager::EventManager;
+    use std::sync::Arc;
 
     const TEST_PROFILE: &str = "test_entry_api";
 
     #[tokio::test]
     async fn test_list_entries() {
-        let manager = Arc::new(EntryManager::new().unwrap());
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(EntryManager::new(event_manager).unwrap());
 
         let params = json!({
             "profile_id": TEST_PROFILE
@@ -284,7 +327,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_stats_today() {
-        let manager = Arc::new(EntryManager::new().unwrap());
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(EntryManager::new(event_manager).unwrap());
 
         let params = json!({
             "profile_id": TEST_PROFILE

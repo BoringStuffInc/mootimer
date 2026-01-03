@@ -5,12 +5,16 @@ build:
     cargo build --release
 
 # Install binaries to ~/.local/bin
-install: build
+install: build mcp-install
     mkdir -p ~/.local/bin
-    @# Try to copy binaries, skip if busy (already running)
-    @cp target/release/mootimer ~/.local/bin/ 2>/dev/null || echo "⚠ TUI already running, skipped mootimer (close TUI to update)"
-    @cp target/release/mootimerd ~/.local/bin/ 2>/dev/null || echo "⚠ Daemon already running, skipped mootimerd (restart daemon to update)"
-    @echo "✓ Installation complete"
+    @# Move old binaries aside (works even if running), copy new ones, clean up
+    @mv ~/.local/bin/mootimer ~/.local/bin/mootimer.old 2>/dev/null || true
+    @cp target/release/mootimer ~/.local/bin/
+    @rm ~/.local/bin/mootimer.old 2>/dev/null || true
+    @mv ~/.local/bin/mootimerd ~/.local/bin/mootimerd.old 2>/dev/null || true
+    @cp target/release/mootimerd ~/.local/bin/
+    @rm ~/.local/bin/mootimerd.old 2>/dev/null || true
+    @echo "✓ Installation complete (running processes will use new binary on next restart)"
     @which mootimer
     @which mootimerd
 
@@ -40,3 +44,13 @@ lint:
 
 # Build and run the TUI
 dev: build run
+
+# Install MCP daemon to ~/.local/bin and configure daemon client
+mcp-install: build
+    mkdir -p ~/.local/bin
+    @mv ~/.local/bin/mootimerd ~/.local/bin/mootimerd.old 2>/dev/null || true
+    @cp target/release/mootimerd ~/.local/bin/
+    @rm ~/.local/bin/mootimerd.old 2>/dev/null || true
+    @echo "✓ Mootimer MCP daemon installed to ~/.local/bin/mootimerd"
+    @echo "  To run as MCP server: ~/.local/bin/mootimerd --mcp"
+

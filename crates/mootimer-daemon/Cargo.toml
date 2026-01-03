@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 mootimer-core.workspace = true
-mootimer-jira.workspace = true
+mootimer-client.workspace = true
 
 tokio.workspace = true
 tokio-serde.workspace = true

@@ -1,10 +1,10 @@
 //! Button rendering utilities
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 pub struct Button<'a> {
