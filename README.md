@@ -84,7 +84,7 @@ cp target/release/mootimer* ~/.local/bin/
    ```
 
 ## Data Storage
-Logs and configuration are stored in `~/.mootimer/`. If initialized as a Git repository, the daemon handles automatic commits and synchronization.
+Data is stored in `~/.local/share/mootimer/` and configuration in `~/.config/mootimer/` (or your operating system's equivalent XDG directories). If initialized as a Git repository, the daemon handles automatic commits and synchronization.
 
 ## License
 MIT
