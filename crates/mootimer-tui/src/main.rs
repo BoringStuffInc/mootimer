@@ -26,7 +26,7 @@ use tracing::info;
 fn setup_logging() -> Result<()> {
     let mut log_path = std::env::temp_dir();
     log_path.push("mootimer-tui.log");
-    
+
     let log_file = std::fs::File::create(log_path)?;
     let subscriber = tracing_subscriber::fmt()
         .with_writer(log_file)
