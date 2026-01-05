@@ -77,25 +77,18 @@ impl TimerEngine {
     }
 
     pub async fn get_timer(&self) -> ActiveTimer {
-        tracing::debug!("engine.get_timer: acquiring read lock");
         let timer = self.timer.read().await;
-        tracing::debug!("engine.get_timer: got read lock");
         let mut timer_copy = timer.clone();
         timer_copy.elapsed_seconds = timer.current_elapsed();
         drop(timer);
-        tracing::debug!("engine.get_timer: released read lock");
         timer_copy
     }
 
     pub async fn start_tick_loop(self: Arc<Self>) {
         let mut tick_interval = interval(self.tick_interval);
-        let timer_id = self.timer_id().await;
-        tracing::debug!("start_tick_loop: starting for timer {}", timer_id);
 
         loop {
-            tracing::debug!("start_tick_loop: waiting for tick");
             tick_interval.tick().await;
-            tracing::debug!("start_tick_loop: got tick");
 
             let timer = self.timer.read().await;
 
@@ -194,23 +187,18 @@ impl TimerEngine {
                 );
                 let _ = self.event_tx.send(event);
 
-                tracing::debug!("Acquiring write lock for timer stop");
                 let mut timer_write = self.timer.write().await;
-                tracing::debug!("Got write lock, calling stop()");
                 timer_write.stop();
                 let duration = timer_write.elapsed_seconds;
                 drop(timer_write);
-                tracing::debug!("Released write lock");
 
                 let stopped_event =
                     TimerEvent::stopped(countdown_profile, countdown_timer_id, duration);
                 let _ = self.event_tx.send(stopped_event);
 
-                tracing::info!("Countdown tick loop breaking");
                 break;
             }
         }
-        tracing::info!("Countdown tick loop ended");
     }
 
     pub async fn pause(&self) -> Result<()> {

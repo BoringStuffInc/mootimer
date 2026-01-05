@@ -1,5 +1,3 @@
-//! Timer manager - manages multiple concurrent timers
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
@@ -10,7 +8,6 @@ use super::engine::{TimerEngine, TimerEngineError};
 use super::events::TimerEvent;
 use crate::event_manager::EventManager;
 
-/// Timer manager error
 #[derive(Debug, thiserror::Error)]
 pub enum TimerManagerError {
     #[error("Timer not found: {0}")]
@@ -25,27 +22,20 @@ pub enum TimerManagerError {
 
 pub type Result<T> = std::result::Result<T, TimerManagerError>;
 
-/// Manages multiple concurrent timers across profiles
 #[derive(Clone)]
 pub struct TimerManager {
-    /// Active timers indexed by profile_id
     timers: Arc<RwLock<HashMap<String, Arc<TimerEngine>>>>,
-    /// Event manager for broadcasting events
     event_manager: Arc<EventManager>,
-    /// Event broadcast channel (for TimerEngine compatibility)
     event_tx: broadcast::Sender<TimerEvent>,
-    /// Completed entries from auto-stopped timers (countdown)
     completed_entries: Arc<RwLock<Vec<(String, Entry)>>>,
 }
 
 impl TimerManager {
-    /// Create a new timer manager
     pub fn new(event_manager: Arc<EventManager>) -> Self {
         let (event_tx, mut event_rx) = broadcast::channel(1000);
         let timers = Arc::new(RwLock::new(HashMap::new()));
         let completed_entries = Arc::new(RwLock::new(Vec::new()));
 
-        // Spawn task to forward timer events to the event manager
         let event_manager_clone = event_manager.clone();
         tokio::spawn(async move {
             while let Ok(timer_event) = event_rx.recv().await {
@@ -61,13 +51,11 @@ impl TimerManager {
         }
     }
 
-    /// Take completed entries (for saving to storage)
     pub async fn take_completed_entries(&self) -> Vec<(String, Entry)> {
         let mut entries = self.completed_entries.write().await;
         std::mem::take(&mut *entries)
     }
 
-    /// Internal: handle countdown completion - remove timer and create entry
     async fn handle_countdown_completion(
         timers: Arc<RwLock<HashMap<String, Arc<TimerEngine>>>>,
         completed_entries: Arc<RwLock<Vec<(String, Entry)>>>,
@@ -75,7 +63,6 @@ impl TimerManager {
     ) {
         tracing::info!("handle_countdown_completion called for {}", profile_id);
 
-        // Remove from active timers
         tracing::debug!("Acquiring write lock on timers HashMap");
         let engine = {
             let mut timers_lock = timers.write().await;
@@ -107,20 +94,17 @@ impl TimerManager {
         tracing::info!("handle_countdown_completion finished for profile");
     }
 
-    /// Subscribe to timer events (delegates to event manager)
     pub fn subscribe(&self) -> broadcast::Receiver<TimerEvent> {
         // For backward compatibility, still return a TimerEvent receiver
         // The event manager will handle broadcasting as DaemonEvent
         self.event_tx.subscribe()
     }
 
-    /// Start a manual timer for a profile
     pub async fn start_manual(
         &self,
         profile_id: String,
         task_id: Option<String>,
     ) -> Result<String> {
-        // Check if profile already has a timer
         {
             let timers = self.timers.read().await;
             if timers.contains_key(&profile_id) {
@@ -128,7 +112,6 @@ impl TimerManager {
             }
         }
 
-        // Create timer engine
         let engine = Arc::new(TimerEngine::new_manual(
             profile_id.clone(),
             task_id.clone(),
@@ -137,7 +120,6 @@ impl TimerManager {
 
         let timer_id = engine.timer_id().await;
 
-        // Emit started event
         let event = TimerEvent::started(
             profile_id.clone(),
             timer_id.clone(),
@@ -147,13 +129,11 @@ impl TimerManager {
         self.event_manager.emit_timer(event.clone());
         let _ = self.event_tx.send(event);
 
-        // Start tick loop
         let engine_clone = engine.clone();
         tokio::spawn(async move {
             engine_clone.start_tick_loop().await;
         });
 
-        // Store timer
         {
             let mut timers = self.timers.write().await;
             timers.insert(profile_id, engine);
@@ -162,14 +142,12 @@ impl TimerManager {
         Ok(timer_id)
     }
 
-    /// Start a pomodoro timer for a profile
     pub async fn start_pomodoro(
         &self,
         profile_id: String,
         task_id: Option<String>,
         config: PomodoroConfig,
     ) -> Result<String> {
-        // Check if profile already has a timer
         {
             let timers = self.timers.read().await;
             if timers.contains_key(&profile_id) {
@@ -177,7 +155,6 @@ impl TimerManager {
             }
         }
 
-        // Create timer engine
         let engine = Arc::new(TimerEngine::new_pomodoro(
             profile_id.clone(),
             task_id.clone(),
@@ -187,7 +164,6 @@ impl TimerManager {
 
         let timer_id = engine.timer_id().await;
 
-        // Emit started event
         let event = TimerEvent::started(
             profile_id.clone(),
             timer_id.clone(),
@@ -197,13 +173,11 @@ impl TimerManager {
         self.event_manager.emit_timer(event.clone());
         let _ = self.event_tx.send(event);
 
-        // Start tick loop
         let engine_clone = engine.clone();
         tokio::spawn(async move {
             engine_clone.start_tick_loop().await;
         });
 
-        // Store timer
         {
             let mut timers = self.timers.write().await;
             timers.insert(profile_id, engine);
@@ -212,14 +186,12 @@ impl TimerManager {
         Ok(timer_id)
     }
 
-    /// Start a countdown timer for a profile
     pub async fn start_countdown(
         &self,
         profile_id: String,
         task_id: Option<String>,
         duration_minutes: u64,
     ) -> Result<String> {
-        // Check if profile already has a timer
         {
             let timers = self.timers.read().await;
             if timers.contains_key(&profile_id) {
@@ -227,7 +199,6 @@ impl TimerManager {
             }
         }
 
-        // Create timer engine
         let engine = Arc::new(TimerEngine::new_countdown(
             profile_id.clone(),
             task_id.clone(),
@@ -237,7 +208,6 @@ impl TimerManager {
 
         let timer_id = engine.timer_id().await;
 
-        // Emit started event
         let event = TimerEvent::started(
             profile_id.clone(),
             timer_id.clone(),
@@ -247,14 +217,12 @@ impl TimerManager {
         self.event_manager.emit_timer(event.clone());
         let _ = self.event_tx.send(event);
 
-        // Start tick loop with completion handler
         let engine_clone = engine.clone();
         let timers_clone = self.timers.clone();
         let completed_entries_clone = self.completed_entries.clone();
         let profile_id_clone = profile_id.clone();
         tokio::spawn(async move {
             engine_clone.start_tick_loop().await;
-            // Tick loop ended - countdown completed, handle cleanup
             Self::handle_countdown_completion(
                 timers_clone,
                 completed_entries_clone,
@@ -263,7 +231,6 @@ impl TimerManager {
             .await;
         });
 
-        // Store timer
         {
             let mut timers = self.timers.write().await;
             timers.insert(profile_id, engine);
@@ -272,7 +239,6 @@ impl TimerManager {
         Ok(timer_id)
     }
 
-    /// Get active timer for a profile
     pub async fn get_timer(&self, profile_id: &str) -> Result<ActiveTimer> {
         tracing::debug!("get_timer: acquiring read lock on timers HashMap");
         let engine = {
@@ -290,7 +256,6 @@ impl TimerManager {
         Ok(result)
     }
 
-    /// Get all active timers
     pub async fn get_all_timers(&self) -> HashMap<String, ActiveTimer> {
         let engines: Vec<_> = {
             let timers = self.timers.read().await;
@@ -305,7 +270,6 @@ impl TimerManager {
         result
     }
 
-    /// Pause timer for a profile
     pub async fn pause(&self, profile_id: &str) -> Result<()> {
         let engine = {
             let timers = self.timers.read().await;
@@ -319,7 +283,6 @@ impl TimerManager {
         Ok(())
     }
 
-    /// Resume timer for a profile
     pub async fn resume(&self, profile_id: &str) -> Result<()> {
         let engine = {
             let timers = self.timers.read().await;
@@ -333,7 +296,6 @@ impl TimerManager {
         Ok(())
     }
 
-    /// Stop timer for a profile and create entry
     pub async fn stop(&self, profile_id: &str) -> Result<Entry> {
         let engine = {
             let mut timers = self.timers.write().await;
@@ -346,7 +308,6 @@ impl TimerManager {
         Ok(entry)
     }
 
-    /// Cancel timer for a profile without creating entry
     pub async fn cancel(&self, profile_id: &str) -> Result<()> {
         let engine = {
             let mut timers = self.timers.write().await;
@@ -359,13 +320,11 @@ impl TimerManager {
         Ok(())
     }
 
-    /// Check if profile has active timer
     pub async fn has_active_timer(&self, profile_id: &str) -> bool {
         let timers = self.timers.read().await;
         timers.contains_key(profile_id)
     }
 
-    /// Get count of active timers
     pub async fn active_timer_count(&self) -> usize {
         let timers = self.timers.read().await;
         timers.len()

@@ -2,6 +2,7 @@
 
 mod buttons;
 mod confirmation;
+pub mod cow;
 mod dashboard;
 mod entries;
 mod input;

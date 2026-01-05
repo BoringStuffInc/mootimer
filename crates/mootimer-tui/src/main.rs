@@ -39,15 +39,12 @@ fn setup_logging() -> Result<()> {
 fn setup_panic_hook() {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        // Restore terminal
         let _ = disable_raw_mode();
         let _ = execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
 
-        // Log the panic
         tracing::error!(?panic_info, "Application panicked");
 
-        // Print panic info to stderr
         eprintln!("A fatal error occurred: {}", panic_info);
 
         original_hook(panic_info);
@@ -58,11 +55,9 @@ fn setup_panic_hook() {
 #[command(name = "mootimer")]
 #[command(about = "MooTimer TUI - Professional work timer", long_about = None)]
 struct Args {
-    /// Socket path for daemon connection
     #[arg(short, long, default_value = "/tmp/mootimer.sock")]
     socket: String,
 
-    /// Default profile ID
     #[arg(short, long)]
     profile: Option<String>,
 }
@@ -108,14 +103,12 @@ async fn handle_daemon_notification(
 ) -> Result<()> {
     match notification.method.as_str() {
         "timer.event" => {
-            // Parse timer event from params
             if let Some(event_type) = notification.params.get("event_type")
                 && let Some(event_type_obj) = event_type.as_object()
                 && let Some(type_str) = event_type_obj.get("type").and_then(|v| v.as_str())
             {
                 match type_str {
                     "tick" => {
-                        // Timer tick - check for 5-minute warning on countdown timers
                         if let Some(remaining) = event_type_obj
                             .get("remaining_seconds")
                             .and_then(|v| v.as_u64())
@@ -132,16 +125,14 @@ async fn handle_daemon_notification(
                             );
                         }
 
-                        // Timer tick - refresh timer display
                         app.refresh_timer().await?;
                     }
                     "started" => {
                         app.status_message = "Timer started".to_string();
-                        app.five_min_warning_shown = false; // Reset warning for new timer
+                        app.five_min_warning_shown = false;
                         app.refresh_timer().await?;
                     }
                     "stopped" => {
-                        // Don't overwrite countdown completion message immediately
                         if !app.status_message.contains("COUNTDOWN COMPLETED") {
                             app.status_message = "Timer stopped, entry saved!".to_string();
                         }
@@ -162,18 +153,14 @@ async fn handle_daemon_notification(
                         app.refresh_timer().await?;
                     }
                     "countdown_completed" => {
-                        // COUNTDOWN COMPLETION - Show notification!
                         app.status_message = "🔔 COUNTDOWN COMPLETED! 🔔".to_string();
 
-                        // Show cow modal if enabled
                         if app.cow_modal_enabled {
                             app.show_cow_modal = true;
                         }
 
-                        // Audio alert
                         audio_alert(app);
 
-                        // OS notification
                         send_urgent_notification(
                             "⏰ Countdown Complete!",
                             "Your countdown timer has finished.",
@@ -184,15 +171,12 @@ async fn handle_daemon_notification(
                         app.refresh_entries().await?;
                     }
                     "phase_completed" => {
-                        // Pomodoro phase completed
                         if let Some(phase_obj) = event_type_obj.get("phase") {
                             let phase = phase_obj.as_str().unwrap_or("unknown");
                             app.status_message = format!("🍅 {} phase completed!", phase);
 
-                            // Audio alert
                             audio_alert(app);
 
-                            // OS notification
                             let (title, body) = match phase {
                                 "work" => ("🍅 Work Complete!", "Time for a break!"),
                                 "short_break" => ("☕ Break Over", "Ready to focus again?"),
@@ -204,12 +188,10 @@ async fn handle_daemon_notification(
                         app.refresh_timer().await?;
                     }
                     "phase_changed" => {
-                        // Pomodoro phase changed
                         if let Some(phase_obj) = event_type_obj.get("new_phase") {
                             let phase = phase_obj.as_str().unwrap_or("unknown");
                             app.status_message = format!("🍅 Starting {} phase", phase);
 
-                            // Show notification for break start (less intrusive for work start)
                             if phase == "short_break" || phase == "long_break" {
                                 let (title, body) = if phase == "short_break" {
                                     ("☕ Short Break", "Take a quick 5-minute break!")
@@ -226,7 +208,6 @@ async fn handle_daemon_notification(
             }
         }
         "task.event" => {
-            // Task event - refresh task list
             if let Some(event_type) = notification.params.get("event_type")
                 && let Some(event_type_obj) = event_type.as_object()
                 && let Some(type_str) = event_type_obj.get("type").and_then(|v| v.as_str())
@@ -247,12 +228,10 @@ async fn handle_daemon_notification(
             }
         }
         "entry.event" => {
-            // Entry event - refresh entries and stats
             app.refresh_entries().await?;
             app.refresh_stats().await?;
         }
         "profile.event" => {
-            // Profile event - refresh profile list
             if let Some(event_type) = notification.params.get("event_type")
                 && let Some(event_type_obj) = event_type.as_object()
                 && let Some(type_str) = event_type_obj.get("type").and_then(|v| v.as_str())
@@ -448,13 +427,11 @@ async fn handle_kanban_mouse(
 }
 
 async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> Result<()> {
-    // Cow Modal (highest priority - dismiss with any key)
     if app.show_cow_modal {
         app.show_cow_modal = false;
         return Ok(());
     }
 
-    // Confirmation Modals
     if app.input_mode == InputMode::DeleteTaskConfirm
         || app.input_mode == InputMode::DeleteProfileConfirm
     {
@@ -476,7 +453,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
         return Ok(());
     }
 
-    // Handle text input modes (NewTask, EditTask, NewProfile, RenameProfile, etc.)
     if app.input_mode != InputMode::Normal {
         match code {
             KeyCode::Enter => {
@@ -488,7 +464,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             }
             KeyCode::Char(c) => {
                 if modifiers.contains(KeyModifiers::CONTROL) {
-                    // Allow Ctrl+C even in input mode
                     if c == 'c' {
                         app.should_quit = true;
                     }
@@ -504,9 +479,7 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
         return Ok(());
     }
 
-    // Normal mode key handling
     match code {
-        // Global shortcuts
         KeyCode::Char('q') | KeyCode::Esc => {
             if app.show_help {
                 app.toggle_help();
@@ -526,7 +499,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             }
         }
 
-        // 't' key for timer type cycling (Dashboard only)
         KeyCode::Char('t') => {
             if app.current_view == AppView::Dashboard
                 && app.focused_pane == app::DashboardPane::TimerConfig
@@ -542,7 +514,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             }
         }
         KeyCode::Char('1') => {
-            // Sync selection FROM Kanban TO Dashboard if switching from Kanban
             if app.current_view == AppView::Kanban {
                 let target_tid = {
                     let tasks = app.get_kanban_tasks(app.selected_column_index);
@@ -566,7 +537,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             app.refresh_tasks().await?;
         }
         KeyCode::Char('2') => {
-            // Sync selection FROM Dashboard TO Kanban if switching from Dashboard
             if app.current_view == AppView::Dashboard {
                 let sync_target = {
                     let filtered = app.get_filtered_tasks();
@@ -609,7 +579,7 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
         }
         KeyCode::Char('4') => {
             app.current_view = AppView::Reports;
-            app.refresh_tasks().await?; // Need tasks for task breakdown
+            app.refresh_tasks().await?;
             app.refresh_reports().await?;
         }
         KeyCode::Char('5') => app.current_view = AppView::Settings,
@@ -618,8 +588,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             app.refresh_logs().await?;
         }
 
-        // Navigation (Left/Right for buttons, PageUp/PageDown for lists)
-        // Note: Up/Down/j/k are now handled per-view for better context awareness
         KeyCode::Left | KeyCode::Char('h') => match app.current_view {
             AppView::Settings => handle_settings_keys(app, code).await?,
             AppView::Kanban => handle_kanban_keys(app, code, modifiers).await?,
@@ -633,12 +601,10 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
         KeyCode::PageUp => app.list_page_up(),
         KeyCode::PageDown => app.list_page_down(),
 
-        // Enter key activates the currently selected button
         KeyCode::Enter => {
             activate_selected_button(app).await?;
         }
 
-        // View-specific actions
         _ => match app.current_view {
             AppView::Dashboard => handle_dashboard_keys(app, code, modifiers).await?,
             AppView::Kanban => handle_kanban_keys(app, code, modifiers).await?,
@@ -1637,6 +1603,7 @@ async fn main() -> Result<()> {
             _ = tokio::time::sleep(Duration::from_millis(16)) => {
                 if last_tick.elapsed() >= Duration::from_millis(30) {
                     app.tomato_state.tick();
+                    app.cow_state.tick();
                     last_tick = std::time::Instant::now();
                 }
 

@@ -11,17 +11,14 @@ use ratatui::{
 pub fn draw_dashboard(f: &mut Frame, app: &mut App, area: Rect) {
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(14),
-            Constraint::Min(6),
+            Constraint::Length(17),
+            Constraint::Min(3),
             Constraint::Length(7),
         ])
         .split(main_chunks[0]);
@@ -67,13 +64,19 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
         false
     };
 
-    let content_chunks = if show_tomato {
+    let show_cow = if let Some(timer) = &active_timer {
+        timer.mode == mootimer_core::models::TimerMode::Countdown
+            && (timer.is_running() || timer.is_paused())
+    } else {
+        false
+    };
+
+    let show_animation = show_tomato || show_cow;
+
+    let content_chunks = if show_animation {
         Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(32),
-            ])
+            .constraints([Constraint::Min(0), Constraint::Length(32)])
             .split(inner_area)
     } else {
         Layout::default()
@@ -83,9 +86,14 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
     let info_area = content_chunks[0];
 
-    if show_tomato && content_chunks.len() > 1 {
-        use crate::ui::tomato::Tomato;
-        f.render_stateful_widget(Tomato, content_chunks[1], &mut app.tomato_state);
+    if show_animation && content_chunks.len() > 1 {
+        if show_tomato {
+            use crate::ui::tomato::Tomato;
+            f.render_stateful_widget(Tomato, content_chunks[1], &mut app.tomato_state);
+        } else if show_cow {
+            use crate::ui::cow::Cow;
+            f.render_stateful_widget(Cow, content_chunks[1], &mut app.cow_state);
+        }
     }
 
     if let Some(timer) = &active_timer {
@@ -103,7 +111,10 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
         let (time_display, _time_label, percent, phase_info) = if timer.is_pomodoro() {
             let remaining = timer.remaining_seconds().unwrap_or(0);
-            let (elapsed_in_phase, phase_duration) = (timer.current_phase_elapsed(), remaining + timer.current_phase_elapsed());
+            let (elapsed_in_phase, phase_duration) = (
+                timer.current_phase_elapsed(),
+                remaining + timer.current_phase_elapsed(),
+            );
 
             let rem_minutes = remaining / 60;
             let rem_seconds = remaining % 60;

@@ -1,5 +1,3 @@
-//! API handlers
-
 pub mod config;
 pub mod entry;
 pub mod profile;
@@ -20,7 +18,6 @@ use crate::sync::SyncManager;
 use crate::task::TaskManager;
 use crate::timer::TimerManager;
 
-/// API error
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error("Method not found: {0}")]
@@ -38,7 +35,6 @@ pub enum ApiError {
 
 pub type Result<T> = std::result::Result<T, ApiError>;
 
-/// Main API handler that routes requests to appropriate handlers
 pub struct ApiHandler {
     event_manager: Arc<EventManager>,
     timer_manager: Arc<TimerManager>,
@@ -59,7 +55,6 @@ impl ApiHandler {
         config_manager: Arc<ConfigManager>,
         sync_manager: Arc<SyncManager>,
     ) -> Self {
-        // Spawn task to save completed entries from auto-stopped timers
         let tm = timer_manager.clone();
         let em = entry_manager.clone();
         let sm = sync_manager.clone();
@@ -76,7 +71,6 @@ impl ApiHandler {
                         continue;
                     }
 
-                    // Auto-commit if configured
                     let config = cm.get().await;
                     if config.sync.auto_commit {
                         if !sm.is_initialized().await {
@@ -124,7 +118,6 @@ impl ApiHandler {
 
     pub async fn handle(&self, method: &str, params: Option<Value>) -> Result<Value> {
         match method {
-            // Timer methods
             "timer.start_manual" => self.handle_timer_start_manual(params).await,
             "timer.start_pomodoro" => self.handle_timer_start_pomodoro(params).await,
             "timer.start_countdown" => self.handle_timer_start_countdown(params).await,
@@ -135,14 +128,12 @@ impl ApiHandler {
             "timer.get" => self.handle_timer_get(params).await,
             "timer.list" => self.handle_timer_list(params).await,
 
-            // Profile methods
             "profile.create" => self.handle_profile_create(params).await,
             "profile.get" => self.handle_profile_get(params).await,
             "profile.list" => self.handle_profile_list(params).await,
             "profile.update" => self.handle_profile_update(params).await,
             "profile.delete" => self.handle_profile_delete(params).await,
 
-            // Task methods
             "task.create" => self.handle_task_create(params).await,
             "task.get" => self.handle_task_get(params).await,
             "task.list" => self.handle_task_list(params).await,
@@ -150,7 +141,6 @@ impl ApiHandler {
             "task.delete" => self.handle_task_delete(params).await,
             "task.search" => self.handle_task_search(params).await,
 
-            // Entry methods
             "entry.list" => self.handle_entry_list(params).await,
             "entry.filter" => self.handle_entry_filter(params).await,
             "entry.delete" => self.handle_entry_delete(params).await,
@@ -165,21 +155,18 @@ impl ApiHandler {
             "entry.week_all_profiles" => self.handle_entry_week_all_profiles(params).await,
             "entry.month_all_profiles" => self.handle_entry_month_all_profiles(params).await,
 
-            // Config methods
             "config.get" => self.handle_config_get(params).await,
             "config.set_default_profile" => self.handle_config_set_default_profile(params).await,
             "config.update_pomodoro" => self.handle_config_update_pomodoro(params).await,
             "config.update_sync" => self.handle_config_update_sync(params).await,
             "config.reset" => self.handle_config_reset(params).await,
 
-            // Sync methods
             "sync.init" => self.handle_sync_init(params).await,
             "sync.status" => self.handle_sync_status(params).await,
             "sync.sync" => self.handle_sync_sync(params).await,
             "sync.commit" => self.handle_sync_commit(params).await,
             "sync.set_remote" => self.handle_sync_set_remote(params).await,
 
-            // Unknown method
             _ => Err(ApiError::MethodNotFound(method.to_string())),
         }
     }
@@ -188,7 +175,6 @@ impl ApiHandler {
         self.event_manager.subscribe()
     }
 
-    // Timer API methods
     async fn handle_timer_start_manual(&self, params: Option<Value>) -> Result<Value> {
         timer::start_manual(&self.timer_manager, params).await
     }
@@ -232,7 +218,6 @@ impl ApiHandler {
         timer::list(&self.timer_manager, params).await
     }
 
-    // Profile API methods
     async fn handle_profile_create(&self, params: Option<Value>) -> Result<Value> {
         profile::create(&self.profile_manager, params).await
     }
@@ -253,7 +238,6 @@ impl ApiHandler {
         profile::delete(&self.profile_manager, params).await
     }
 
-    // Task API methods
     async fn handle_task_create(&self, params: Option<Value>) -> Result<Value> {
         task::create(&self.task_manager, params).await
     }
@@ -278,7 +262,6 @@ impl ApiHandler {
         task::search(&self.task_manager, params).await
     }
 
-    // Entry API methods
     async fn handle_entry_list(&self, params: Option<Value>) -> Result<Value> {
         entry::list(&self.entry_manager, params).await
     }
@@ -331,7 +314,6 @@ impl ApiHandler {
         entry::get_month_all_profiles(&self.entry_manager, &self.profile_manager, params).await
     }
 
-    // Config API methods
     async fn handle_config_get(&self, params: Option<Value>) -> Result<Value> {
         config::get(&self.config_manager, params).await
     }
@@ -352,7 +334,6 @@ impl ApiHandler {
         config::reset(&self.config_manager, params).await
     }
 
-    // Sync API methods
     async fn handle_sync_init(&self, params: Option<Value>) -> Result<Value> {
         sync::init(&self.sync_manager, params).await
     }
@@ -373,8 +354,6 @@ impl ApiHandler {
         sync::set_remote(&self.sync_manager, params).await?;
         Ok(Value::Null)
     }
-
-    // --- Direct API Access Methods for MCP ---
 
     pub async fn profile_list(&self) -> Result<Value> {
         profile::list(&self.profile_manager, None).await

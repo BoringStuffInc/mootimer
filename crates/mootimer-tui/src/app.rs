@@ -1,5 +1,6 @@
 //! Application state management
 
+use crate::ui::cow::CowState;
 use crate::ui::tomato::TomatoState;
 use anyhow::Result;
 use mootimer_client::MooTimerClient;
@@ -120,6 +121,7 @@ pub struct App {
     pub show_cow_modal: bool,
     pub show_task_description: bool,
     pub tomato_state: TomatoState,
+    pub cow_state: CowState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,6 +180,7 @@ impl App {
             show_cow_modal: false,
             show_task_description: false,
             tomato_state: TomatoState::new(),
+            cow_state: CowState::new(),
         }
     }
 
