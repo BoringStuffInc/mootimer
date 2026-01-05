@@ -9,22 +9,20 @@ use ratatui::{
 };
 
 pub fn draw_dashboard(f: &mut Frame, app: &mut App, area: Rect) {
-    // New layout: Timer + Profile + Stats | Tasks List
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50), // Left: Timer + Profile + Stats
-            Constraint::Percentage(50), // Right: Tasks List
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
         ])
         .split(area);
 
-    // Left side: Timer, Profile selector, and Stats vertically stacked
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(14), // Timer with configuration
-            Constraint::Min(6),     // Profile selector (expanded)
-            Constraint::Length(7),  // Today's Stats (compact)
+            Constraint::Length(14),
+            Constraint::Min(6),
+            Constraint::Length(7),
         ])
         .split(main_chunks[0]);
 
@@ -32,12 +30,10 @@ pub fn draw_dashboard(f: &mut Frame, app: &mut App, area: Rect) {
     draw_profile_selector(f, app, left_chunks[1]);
     draw_stats(f, app, left_chunks[2]);
 
-    // Right side: Tasks list
     draw_tasks_list(f, app, main_chunks[1]);
 }
 
 fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
-    // 1. Render the main container block
     let title = if app.focused_pane == DashboardPane::TimerConfig {
         "⏱  Timer ⟨ FOCUSED ⟩"
     } else {
@@ -57,30 +53,26 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
         .title(title)
         .border_style(border_style);
 
-    // Calculate the inner area for content
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    // Try to parse ActiveTimer from JSON
     let active_timer: Option<ActiveTimer> = app
         .timer_info
         .clone()
         .and_then(|v| serde_json::from_value(v).ok());
 
-    // 2. Check if Tomato should be shown
     let show_tomato = if let Some(timer) = &active_timer {
         timer.is_pomodoro() && (timer.is_running() || timer.is_paused())
     } else {
         false
     };
 
-    // 3. Split Layout: Left (Info) | Right (Tomato)
     let content_chunks = if show_tomato {
         Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Min(0),     // Info takes remaining space
-                Constraint::Length(32), // Tomato needs fixed width
+                Constraint::Min(0),
+                Constraint::Length(32),
             ])
             .split(inner_area)
     } else {
@@ -91,15 +83,12 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
     let info_area = content_chunks[0];
 
-    // Render Tomato if active
     if show_tomato && content_chunks.len() > 1 {
         use crate::ui::tomato::Tomato;
         f.render_stateful_widget(Tomato, content_chunks[1], &mut app.tomato_state);
     }
 
-    // 4. Render Timer Info & Gauge into info_area
     if let Some(timer) = &active_timer {
-        // Timer is running/paused - show current state
         let color = match timer.state {
             mootimer_core::models::TimerState::Running => Color::Green,
             mootimer_core::models::TimerState::Paused => Color::Yellow,
@@ -113,10 +102,8 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
         };
 
         let (time_display, _time_label, percent, phase_info) = if timer.is_pomodoro() {
-            // Pomodoro logic
             let remaining = timer.remaining_seconds().unwrap_or(0);
-            let elapsed_in_phase = timer.current_phase_elapsed();
-            let phase_duration = remaining + elapsed_in_phase;
+            let (elapsed_in_phase, phase_duration) = (timer.current_phase_elapsed(), remaining + timer.current_phase_elapsed());
 
             let rem_minutes = remaining / 60;
             let rem_seconds = remaining % 60;
@@ -127,7 +114,9 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 0.0
             };
 
-            let pomo = timer.pomodoro_state.as_ref().unwrap();
+            let Some(pomo) = timer.pomodoro_state.as_ref() else {
+                return;
+            };
             let phase_name = match pomo.phase {
                 PomodoroPhase::Work => "Work",
                 PomodoroPhase::ShortBreak => "Short Break",
@@ -141,7 +130,6 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("{} (Session {})", phase_name, pomo.current_session),
             )
         } else if timer.mode == mootimer_core::models::TimerMode::Countdown {
-            // Countdown logic
             let elapsed = timer.current_elapsed();
             let target = timer.target_duration.unwrap_or(0);
             let remaining = target.saturating_sub(elapsed);
@@ -166,7 +154,6 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 "Countdown".to_string(),
             )
         } else {
-            // Manual
             let elapsed = timer.current_elapsed();
             let hours = elapsed / 3600;
             let minutes = (elapsed % 3600) / 60;
@@ -214,14 +201,13 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             Line::from("    [Space]Pause/Resume  [x]Stop  [r]Refresh"),
         ];
 
-        // Layout for Info Area (Text Top | Gauge Bottom)
         let info_chunks = if percent.is_some() {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(8),
-                    Constraint::Length(1), // Gauge height
-                    Constraint::Length(1), // Padding
+                    Constraint::Length(1),
+                    Constraint::Length(1),
                 ])
                 .split(info_area)
         } else {
@@ -230,11 +216,9 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 .split(info_area)
         };
 
-        // Render Text
-        let text_widget = Paragraph::new(text_lines); // No Block!
+        let text_widget = Paragraph::new(text_lines);
         f.render_widget(text_widget, info_chunks[0]);
 
-        // Render Gauge if applicable
         if let Some(ratio) = percent
             && info_chunks.len() >= 2
         {
@@ -246,7 +230,6 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             f.render_widget(gauge, info_chunks[1]);
         }
     } else {
-        // No timer running - show configuration
         use crate::app::TimerType;
 
         let selected_task = app
@@ -297,7 +280,7 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             Line::from(format!("    {}  [Space/Enter]Start", config_hint)),
         ];
 
-        let text_widget = Paragraph::new(text_lines); // No Block!
+        let text_widget = Paragraph::new(text_lines);
         f.render_widget(text_widget, info_area);
     }
 }
@@ -344,7 +327,6 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
                 let is_selected = i == app.selected_task_index;
                 let mut style = Style::default();
 
-                // Color coding based on status
                 match status {
                     "completed" => {
                         style = style.fg(Color::Green);
@@ -356,14 +338,12 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
                         style = style.fg(Color::Yellow).add_modifier(Modifier::BOLD);
                     }
                     _ => {
-                        // Todo / default
                         if is_selected {
                             style = style.fg(Color::Yellow).add_modifier(Modifier::BOLD);
                         }
                     }
                 }
 
-                // Selection override (background)
                 if is_selected {
                     style = style.bg(Color::DarkGray);
                 }
@@ -461,7 +441,6 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or("Unnamed");
 
             let is_active = id == app.profile_id;
-            // Highlight selected index IF the pane is focused, otherwise just show active
             let is_selected = i == app.selected_profile_index;
 
             let mut style = Style::default();
@@ -473,10 +452,8 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
                 "  "
             };
 
-            // If pane is focused, highlight the selected row
             if app.focused_pane == DashboardPane::ProfileList && is_selected {
                 style = style.bg(Color::DarkGray);
-                // If it's not the active one, maybe give it a different color to indicate selection?
                 if !is_active {
                     style = style.fg(Color::Yellow);
                 }
@@ -511,9 +488,6 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
             .border_style(border_style),
     );
 
-    // We need to maintain a scrolling state for the list if there are many profiles
-    // For now, we can manually offset, or just use a transient ListState if we don't store it in App
-    // Since App stores `selected_profile_index`, we can use that.
     let mut state = ratatui::widgets::ListState::default();
     state.select(Some(app.selected_profile_index));
 

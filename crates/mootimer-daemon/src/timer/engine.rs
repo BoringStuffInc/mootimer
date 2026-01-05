@@ -1,5 +1,3 @@
-//! Timer engine - manages individual timer state and lifecycle
-
 use chrono::Utc;
 use mootimer_core::models::{ActiveTimer, Entry, PomodoroConfig};
 use std::sync::Arc;
@@ -8,7 +6,6 @@ use tokio::time::{Duration, interval};
 
 use super::events::{TimerEvent, TimerEventType};
 
-/// Timer engine error
 #[derive(Debug, thiserror::Error)]
 pub enum TimerEngineError {
     #[error("Timer not found: {0}")]
@@ -26,7 +23,6 @@ pub enum TimerEngineError {
 
 pub type Result<T> = std::result::Result<T, TimerEngineError>;
 
-/// Timer engine manages the lifecycle of a single timer
 pub struct TimerEngine {
     timer: Arc<RwLock<ActiveTimer>>,
     event_tx: broadcast::Sender<TimerEvent>,
@@ -34,7 +30,6 @@ pub struct TimerEngine {
 }
 
 impl TimerEngine {
-    /// Create a new timer engine with a manual timer
     pub fn new_manual(
         profile_id: String,
         task_id: Option<String>,
@@ -48,7 +43,6 @@ impl TimerEngine {
         }
     }
 
-    /// Create a new timer engine with a pomodoro timer
     pub fn new_pomodoro(
         profile_id: String,
         task_id: Option<String>,
@@ -63,7 +57,6 @@ impl TimerEngine {
         }
     }
 
-    /// Create a new timer engine with a countdown timer
     pub fn new_countdown(
         profile_id: String,
         task_id: Option<String>,
@@ -78,27 +71,22 @@ impl TimerEngine {
         }
     }
 
-    /// Get the timer ID
     pub async fn timer_id(&self) -> String {
-        // For now, use profile_id as timer_id (we'll improve this later)
         let timer = self.timer.read().await;
         timer.profile_id.clone()
     }
 
-    /// Get the timer state
     pub async fn get_timer(&self) -> ActiveTimer {
         tracing::debug!("engine.get_timer: acquiring read lock");
         let timer = self.timer.read().await;
         tracing::debug!("engine.get_timer: got read lock");
         let mut timer_copy = timer.clone();
-        // Update elapsed_seconds to current value
         timer_copy.elapsed_seconds = timer.current_elapsed();
         drop(timer);
         tracing::debug!("engine.get_timer: released read lock");
         timer_copy
     }
 
-    /// Start the timer tick loop
     pub async fn start_tick_loop(self: Arc<Self>) {
         let mut tick_interval = interval(self.tick_interval);
         let timer_id = self.timer_id().await;
@@ -111,7 +99,6 @@ impl TimerEngine {
 
             let timer = self.timer.read().await;
 
-            // Only tick if running
             if !timer.is_running() {
                 continue;
             }
@@ -121,22 +108,22 @@ impl TimerEngine {
             let profile_id = timer.profile_id.clone();
             let timer_id = profile_id.clone();
 
-            drop(timer); // Release read lock before emitting event
+            drop(timer);
 
-            // Emit tick event
             let event = TimerEvent::tick(profile_id.clone(), timer_id.clone(), elapsed, remaining);
             let _ = self.event_tx.send(event);
 
-            // Check for pomodoro phase completion
             let timer = self.timer.read().await;
             if timer.is_pomodoro() && timer.is_phase_complete() {
-                let pomo_state = timer.pomodoro_state.as_ref().unwrap();
+                let Some(pomo_state) = timer.pomodoro_state.as_ref() else {
+                    drop(timer);
+                    continue;
+                };
                 let current_phase = pomo_state.phase;
                 let current_session = pomo_state.current_session;
 
                 drop(timer);
 
-                // Emit phase completed event
                 let event = TimerEvent::new(
                     TimerEventType::PhaseCompleted {
                         phase: current_phase,
@@ -147,28 +134,27 @@ impl TimerEngine {
                 );
                 let _ = self.event_tx.send(event);
 
-                // Transition to next phase
                 let mut timer = self.timer.write().await;
                 if let Err(e) = timer.next_phase() {
                     tracing::error!("Failed to transition to next phase: {}", e);
                     continue;
                 }
 
-                let new_phase = timer.pomodoro_state.as_ref().unwrap().phase;
-                let new_session = timer.pomodoro_state.as_ref().unwrap().current_session;
+                let Some(pomo_state) = timer.pomodoro_state.as_ref() else {
+                    drop(timer);
+                    continue;
+                };
+                let new_phase = pomo_state.phase;
+                let new_session = pomo_state.current_session;
 
                 drop(timer);
 
-                // Emit phase changed event
                 let event = TimerEvent::phase_changed(profile_id, timer_id, new_phase, new_session);
                 let _ = self.event_tx.send(event);
             } else {
-                // Drop the read lock if we didn't enter the if block
-                // This prevents deadlock when countdown timer tries to acquire write lock
                 drop(timer);
             }
 
-            // Check for countdown timer completion
             let should_complete = {
                 let timer = self.timer.read().await;
                 if timer.mode == mootimer_core::models::TimerMode::Countdown {
@@ -187,7 +173,10 @@ impl TimerEngine {
                 let timer = self.timer.read().await;
                 let countdown_profile = timer.profile_id.clone();
                 let countdown_timer_id = countdown_profile.clone();
-                let target = timer.target_duration.unwrap();
+                let Some(target) = timer.target_duration else {
+                    drop(timer);
+                    continue;
+                };
                 let elapsed = timer.current_elapsed();
                 drop(timer);
 
@@ -198,7 +187,6 @@ impl TimerEngine {
                     target
                 );
 
-                // Emit countdown completed event
                 let event = TimerEvent::new(
                     TimerEventType::CountdownCompleted,
                     countdown_profile.clone(),
@@ -207,7 +195,6 @@ impl TimerEngine {
                 let _ = self.event_tx.send(event);
 
                 tracing::debug!("Acquiring write lock for timer stop");
-                // Auto-stop the timer
                 let mut timer_write = self.timer.write().await;
                 tracing::debug!("Got write lock, calling stop()");
                 timer_write.stop();
@@ -215,20 +202,17 @@ impl TimerEngine {
                 drop(timer_write);
                 tracing::debug!("Released write lock");
 
-                // Emit stopped event so manager can clean up
                 let stopped_event =
                     TimerEvent::stopped(countdown_profile, countdown_timer_id, duration);
                 let _ = self.event_tx.send(stopped_event);
 
                 tracing::info!("Countdown tick loop breaking");
-                // Exit the tick loop - timer is done
                 break;
             }
         }
         tracing::info!("Countdown tick loop ended");
     }
 
-    /// Pause the timer
     pub async fn pause(&self) -> Result<()> {
         let mut timer = self.timer.write().await;
         timer.pause()?;
@@ -246,7 +230,6 @@ impl TimerEngine {
         Ok(())
     }
 
-    /// Resume the timer
     pub async fn resume(&self) -> Result<()> {
         let mut timer = self.timer.write().await;
         timer.resume()?;
@@ -261,14 +244,12 @@ impl TimerEngine {
         Ok(())
     }
 
-    /// Stop the timer and create an entry
     pub async fn stop(&self) -> Result<Entry> {
         let mut timer = self.timer.write().await;
         timer.stop();
 
         let duration = timer.elapsed_seconds;
 
-        // Create entry from timer
         let entry = Entry::create_completed(
             timer.task_id.clone(),
             timer.start_time,
@@ -283,7 +264,6 @@ impl TimerEngine {
         Ok(entry)
     }
 
-    /// Cancel the timer without creating an entry
     pub async fn cancel(&self) -> Result<()> {
         let mut timer = self.timer.write().await;
         timer.stop();
@@ -334,12 +314,10 @@ mod tests {
         let (tx, _rx) = broadcast::channel(100);
         let engine = TimerEngine::new_manual("test".to_string(), None, tx);
 
-        // Pause
         engine.pause().await.unwrap();
         let timer = engine.get_timer().await;
         assert!(timer.is_paused());
 
-        // Resume
         engine.resume().await.unwrap();
         let timer = engine.get_timer().await;
         assert!(timer.is_running());
@@ -363,7 +341,6 @@ mod tests {
         let (tx, mut rx) = broadcast::channel(100);
         let engine = TimerEngine::new_manual("test".to_string(), None, tx);
 
-        // Pause should emit event
         engine.pause().await.unwrap();
         let event = rx.recv().await.unwrap();
         match event.event_type {
@@ -371,7 +348,6 @@ mod tests {
             _ => panic!("Expected Paused event"),
         }
 
-        // Resume should emit event
         engine.resume().await.unwrap();
         let event = rx.recv().await.unwrap();
         match event.event_type {
@@ -388,21 +364,18 @@ mod tests {
         let engine = Arc::new(TimerEngine::new_countdown(
             "test_profile".to_string(),
             None,
-            60, // 60 minutes - long enough that it won't complete during test
+            60,
             tx,
         ));
 
         let engine_clone = engine.clone();
 
-        // Spawn the tick loop
         let tick_task = tokio::spawn(async move {
             engine_clone.start_tick_loop().await;
         });
 
-        // Give it some time to start ticking
         sleep(Duration::from_millis(100)).await;
 
-        // Try to get timer while tick loop is running (this should not deadlock)
         let timer_result = tokio::time::timeout(Duration::from_secs(5), engine.get_timer()).await;
 
         assert!(
@@ -412,14 +385,12 @@ mod tests {
         let timer = timer_result.unwrap();
         assert_eq!(timer.mode, mootimer_core::models::TimerMode::Countdown);
 
-        // Try multiple times
         for _ in 0..5 {
             sleep(Duration::from_millis(50)).await;
             let result = tokio::time::timeout(Duration::from_secs(5), engine.get_timer()).await;
             assert!(result.is_ok(), "get_timer should not deadlock");
         }
 
-        // Clean up - cancel the timer to stop the tick loop
         engine.cancel().await.unwrap();
 
         let _ = tokio::time::timeout(Duration::from_secs(5), tick_task).await;
