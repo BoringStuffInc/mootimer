@@ -49,16 +49,39 @@ MooTimer uses a **daemon-client** architecture:
 - **Git Sync**: Automatic versioning and multi-device synchronization of your time logs.
 - **MCP Support**: Built-in Model Context Protocol server for LLM integration.
 
-## Quick Start
+## Installation
 
-### Build
+### Prerequisites
+- **Rust**: [Install Rust](https://www.rust-lang.org/tools/install) (latest stable)
+- **just** (optional): [Install Just](https://github.com/casey/just) for easier command execution
+
+### Easy Install (recommended)
+If you have `just` installed, simply run:
+```bash
+just install
+```
+This will build the binaries in release mode and install them to `~/.local/bin/`.
+
+### Manual Installation
+If you don't have `just`, you can build and install manually:
 ```bash
 cargo build --release
+mkdir -p ~/.local/bin
+cp target/release/mootimer* ~/.local/bin/
 ```
 
-### Run
-1. Start the daemon: `./target/release/mootimerd`
-2. Start the TUI: `./target/release/mootimer`
+## Quick Start
+
+1. **Start the daemon**:
+   ```bash
+   mootimerd
+   ```
+   (Or run in background: `mootimerd &`)
+
+2. **Start the TUI**:
+   ```bash
+   mootimer
+   ```
 
 ## Data Storage
 Logs and configuration are stored in `~/.mootimer/`. If initialized as a Git repository, the daemon handles automatic commits and synchronization.
