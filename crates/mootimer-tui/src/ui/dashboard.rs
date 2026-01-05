@@ -62,10 +62,19 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
         }
     };
 
+    let mut hint_line = Line::from(hint);
+    if app.focused_pane == DashboardPane::ProfileList {
+        hint_line = Line::from(vec![
+            Span::styled("[Ctrl+w]", Style::default().fg(Color::Yellow)),
+            Span::raw("Focus "),
+            Span::raw(hint),
+        ]);
+    }
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .title_bottom(Line::from(hint).right_aligned())
+        .title_bottom(hint_line.right_aligned())
         .border_style(border_style);
 
     let inner_area = block.inner(area);
@@ -160,7 +169,7 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             _ => "⏹",
         };
 
-        let (time_display, _time_label, percent, phase_info) = if timer.is_pomodoro() {
+        let (time_display, _time_label, percent, phase_info, next_phase_info) = if timer.is_pomodoro() {
             let remaining = timer.remaining_seconds().unwrap_or(0);
             let (elapsed_in_phase, phase_duration) = (
                 timer.current_phase_elapsed(),
@@ -185,11 +194,23 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 PomodoroPhase::LongBreak => "Long Break",
             };
 
+            let next_phase = match pomo.phase {
+                PomodoroPhase::Work => {
+                    if (pomo.current_session) % pomo.config.sessions_until_long_break == 0 {
+                        "Long Break"
+                    } else {
+                        "Short Break"
+                    }
+                }
+                _ => "Work",
+            };
+
             (
                 format!("    {} {:02}:{:02}", state_icon, rem_minutes, rem_seconds),
                 "Remaining",
                 Some(ratio),
                 format!("{} (Session {})", phase_name, pomo.current_session),
+                Some(next_phase.to_string()),
             )
         } else if timer.mode == mootimer_core::models::TimerMode::Countdown {
             let elapsed = timer.current_elapsed();
@@ -214,6 +235,7 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 "Remaining",
                 Some(ratio),
                 "Countdown".to_string(),
+                None,
             )
         } else {
             let elapsed = timer.current_elapsed();
@@ -233,6 +255,7 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 "Elapsed (Work)",
                 None,
                 "Manual Timer".to_string(),
+                None,
             )
         };
 
@@ -282,11 +305,19 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled("PHASE:  ", Style::default().add_modifier(Modifier::DIM)),
                 Span::styled(phase_info, Style::default().add_modifier(Modifier::BOLD)),
             ]),
-            Line::from(vec![
-                Span::styled("TASK:   ", Style::default().add_modifier(Modifier::DIM)),
-                Span::styled(task_name, Style::default().fg(Color::Cyan)),
-            ]),
         ];
+
+        if let Some(next) = next_phase_info {
+            text_lines.push(Line::from(vec![
+                Span::styled("NEXT:   ", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(next, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+
+        text_lines.push(Line::from(vec![
+            Span::styled("TASK:   ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(task_name, Style::default().fg(Color::Cyan)),
+        ]));
 
         if !time_display.is_empty() {
             text_lines.insert(0, Line::from(""));
@@ -392,7 +423,7 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
 
                 let status_icon = match status {
                     "in_progress" => "▶",
-                    "completed" => "✓",
+                    "done" | "completed" => "✓",
                     _ => "○",
                 };
 
@@ -400,7 +431,7 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
                 let mut style = Style::default();
 
                 match status {
-                    "completed" => {
+                    "done" | "completed" => {
                         style = style.fg(Color::Green);
                         if !is_selected {
                             style = style.add_modifier(Modifier::DIM);
@@ -465,6 +496,16 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
         action_hint, view_hint
     );
 
+    let bottom_hint_line = if app.focused_pane == DashboardPane::TimerConfig {
+        Line::from(vec![
+            Span::styled("[Ctrl+w]", Style::default().fg(Color::Yellow)),
+            Span::raw("Focus "),
+            Span::raw(bottom_hint.clone()),
+        ])
+    } else {
+        Line::from(bottom_hint)
+    };
+
     let border_style = if app.focused_pane == DashboardPane::TasksList {
         Style::default()
             .fg(Color::Cyan)
@@ -476,7 +517,7 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .title_bottom(Line::from(bottom_hint).right_aligned())
+        .title_bottom(bottom_hint_line.right_aligned())
         .border_style(border_style);
 
     let tasks_list = List::new(task_items).block(block);
@@ -538,10 +579,20 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
 
     let bottom_hint = " [Enter]Switch [n]New [d]Del [r]Rename ";
 
+    let bottom_hint_line = if app.focused_pane == DashboardPane::TasksList {
+        Line::from(vec![
+            Span::styled("[Ctrl+w]", Style::default().fg(Color::Yellow)),
+            Span::raw("Focus "),
+            Span::raw(bottom_hint),
+        ])
+    } else {
+        Line::from(bottom_hint)
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .title_bottom(Line::from(bottom_hint).right_aligned())
+        .title_bottom(bottom_hint_line.right_aligned())
         .border_style(border_style);
 
     let mut state = ratatui::widgets::ListState::default();

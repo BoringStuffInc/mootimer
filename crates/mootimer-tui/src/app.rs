@@ -4,7 +4,6 @@ use anyhow::Result;
 use mootimer_client::MooTimerClient;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +27,7 @@ pub enum DashboardPane {
 pub enum InputMode {
     Normal,
     NewTask,
+    QuickAddTask,
     EditTask,
     SearchTasks,
     DeleteTaskConfirm,
@@ -54,10 +54,11 @@ pub enum SettingsItem {
     CowModal,
     SyncAutoCommit,
     SyncInitRepo,
+    SyncNow,
 }
 
 impl SettingsItem {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::PomodoroWork,
         Self::PomodoroShortBreak,
         Self::PomodoroLongBreak,
@@ -66,6 +67,7 @@ impl SettingsItem {
         Self::CowModal,
         Self::SyncAutoCommit,
         Self::SyncInitRepo,
+        Self::SyncNow,
     ];
 }
 
@@ -88,11 +90,10 @@ pub struct App {
 
     pub timer_info: Option<Value>,
     pub stats_today: Option<Value>,
-    pub stats_week: Option<Value>,
-    pub stats_month: Option<Value>,
     pub tasks: Vec<Value>,
     pub entries: Vec<Value>,
     pub report_entries: Vec<Value>,
+    pub report_stats: Option<Value>,
     pub sync_status: Option<Value>,
     pub config: Option<Value>,
     pub log_lines: Vec<String>,
@@ -150,11 +151,10 @@ impl App {
 
             timer_info: None,
             stats_today: None,
-            stats_week: None,
-            stats_month: None,
             tasks: Vec::new(),
             entries: Vec::new(),
             report_entries: Vec::new(),
+            report_stats: None,
             sync_status: None,
             config: None,
             log_lines: Vec::new(),
@@ -377,6 +377,12 @@ impl App {
                     self.selected_entry_index += 1;
                 }
             }
+            AppView::Kanban => {
+                let len = self.get_kanban_tasks(self.selected_column_index).len();
+                if len > 0 && self.selected_kanban_card_index < len.saturating_sub(1) {
+                    self.selected_kanban_card_index += 1;
+                }
+            }
             _ => {}
         }
     }
@@ -390,6 +396,9 @@ impl App {
             }
             AppView::Entries => {
                 self.selected_entry_index = self.selected_entry_index.saturating_sub(1);
+            }
+            AppView::Kanban => {
+                self.selected_kanban_card_index = self.selected_kanban_card_index.saturating_sub(1);
             }
             _ => {}
         }
@@ -498,51 +507,27 @@ impl App {
         } else {
             let params = Some(serde_json::json!({"profile_id": self.report_profile}));
 
-            match self.report_period.as_str() {
-                "week" => {
-                    self.stats_week = self
-                        .client
-                        .call("entry.stats_week", params.clone())
-                        .await
-                        .ok();
-                    self.report_entries = self
-                        .client
-                        .call("entry.week", params)
-                        .await
-                        .ok()
-                        .and_then(|v| v.as_array().cloned())
-                        .unwrap_or_default();
-                }
-                "month" => {
-                    self.stats_month = self
-                        .client
-                        .call("entry.stats_month", params.clone())
-                        .await
-                        .ok();
-                    self.report_entries = self
-                        .client
-                        .call("entry.month", params)
-                        .await
-                        .ok()
-                        .and_then(|v| v.as_array().cloned())
-                        .unwrap_or_default();
-                }
-                _ => {
-                    if self.report_profile == self.profile_id {
-                        self.refresh_stats().await?;
-                    }
-                    self.report_entries = self
-                        .client
-                        .call(
-                            "entry.today",
-                            Some(serde_json::json!({"profile_id": self.report_profile})),
-                        )
-                        .await
-                        .ok()
-                        .and_then(|v| v.as_array().cloned())
-                        .unwrap_or_default();
-                }
-            }
+            let stats_method = match self.report_period.as_str() {
+                "week" => "entry.stats_week",
+                "month" => "entry.stats_month",
+                _ => "entry.stats_today",
+            };
+
+            self.report_stats = self.client.call(stats_method, params.clone()).await.ok();
+
+            let entries_method = match self.report_period.as_str() {
+                "week" => "entry.week",
+                "month" => "entry.month",
+                _ => "entry.today",
+            };
+
+            self.report_entries = self
+                .client
+                .call(entries_method, params)
+                .await
+                .ok()
+                .and_then(|v| v.as_array().cloned())
+                .unwrap_or_default();
         }
 
         let profile_label = if self.report_profile == "all" {
@@ -568,95 +553,32 @@ impl App {
             return Ok(());
         }
 
-        self.status_message = "Loading all profiles...".to_string();
+        self.status_message = format!("Loading {} for all profiles...", self.report_period);
 
-        let profiles = if self.profiles.is_empty() {
-            match self.client.profile_list().await {
-                Ok(val) => val.as_array().cloned().unwrap_or_default(),
-                Err(_) => {
-                    self.status_message = "Failed to fetch profiles".to_string();
-                    return Ok(());
-                }
-            }
-        } else {
-            self.profiles.clone()
+        let method = match self.report_period.as_str() {
+            "week" => "entry.week_all_profiles",
+            "month" => "entry.month_all_profiles",
+            _ => "entry.today_all_profiles",
         };
 
-        let profile_count = profiles.len();
+        match self.client.call(method, None).await {
+            Ok(value) => {
+                let all_entries = value.as_array().cloned().unwrap_or_default();
+                self.cross_profile_cache
+                    .insert(cache_key, (all_entries.clone(), Instant::now()));
 
-        if profile_count > 50 {
-            self.status_message = format!(
-                "Warning: Loading {} profiles, this may take a moment...",
-                profile_count
-            );
-        }
+                self.report_entries = all_entries;
+                self.update_cross_profile_stats();
 
-        let client = Arc::new(&self.client);
-        let period = self.report_period.clone();
-
-        let fetch_futures: Vec<_> = profiles
-            .iter()
-            .map(|profile| {
-                let profile_id = profile
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let client = Arc::clone(&client);
-                let period = period.clone();
-
-                async move {
-                    let method = match period.as_str() {
-                        "week" => "entry.week",
-                        "month" => "entry.month",
-                        _ => "entry.today",
-                    };
-
-                    let result = client
-                        .call(method, Some(serde_json::json!({"profile_id": profile_id})))
-                        .await;
-
-                    (profile_id, result)
-                }
-            })
-            .collect();
-
-        self.status_message = format!("Fetching {} profiles in parallel...", profile_count);
-        let results = futures::future::join_all(fetch_futures).await;
-
-        let mut all_entries = Vec::new();
-        let mut success_count = 0;
-
-        for (profile_id, result) in results {
-            if let Ok(value) = result
-                && let Some(entries_array) = value.as_array()
-            {
-                success_count += 1;
-                for entry in entries_array {
-                    if let Some(mut entry_obj) = entry.as_object().cloned() {
-                        entry_obj.insert(
-                            "profile_id".to_string(),
-                            serde_json::Value::String(profile_id.clone()),
-                        );
-
-                        all_entries.push(serde_json::Value::Object(entry_obj));
-                    }
-                }
+                self.status_message = format!(
+                    "Loaded {} entries from all profiles",
+                    self.report_entries.len()
+                );
+            }
+            Err(e) => {
+                self.status_message = format!("Failed to fetch all profiles: {}", e);
             }
         }
-
-        self.cross_profile_cache
-            .insert(cache_key, (all_entries.clone(), Instant::now()));
-
-        self.report_entries = all_entries;
-        self.update_cross_profile_stats();
-
-        self.status_message = format!(
-            "Loaded {} entries from {}/{} profiles",
-            self.report_entries.len(),
-            success_count,
-            profile_count
-        );
 
         Ok(())
     }
@@ -668,7 +590,7 @@ impl App {
             .filter_map(|e| e.get("duration_seconds").and_then(|v| v.as_u64()))
             .sum();
 
-        self.stats_today = Some(serde_json::json!({
+        self.report_stats = Some(serde_json::json!({
             "total_duration_seconds": total_seconds,
             "total_entries": self.report_entries.len(),
             "pomodoro_count": 0,
@@ -937,6 +859,23 @@ impl App {
         Ok(())
     }
 
+    pub async fn quick_task_create(&mut self, title: &str) -> Result<()> {
+        if title.trim().is_empty() {
+            return Ok(());
+        }
+
+        match self.client.task_create(&self.profile_id, title, None).await {
+            Ok(_) => {
+                self.status_message = format!("Quick add: {}", title);
+                self.refresh_tasks().await?;
+            }
+            Err(e) => {
+                self.status_message = format!("Error: {}", e);
+            }
+        }
+        Ok(())
+    }
+
     pub async fn archive_task(&mut self, task_id: &str) -> Result<()> {
         if let Some(task) = self
             .tasks
@@ -1002,6 +941,12 @@ impl App {
                             self.status_message = format!("Error creating task: {}", e);
                         }
                     }
+                }
+            }
+            InputMode::QuickAddTask => {
+                if !self.input_buffer.is_empty() {
+                    let title = self.input_buffer.clone();
+                    self.quick_task_create(&title).await?;
                 }
             }
             InputMode::EditTask => {
@@ -1449,6 +1394,28 @@ impl App {
             }
             Err(e) => {
                 self.status_message = format!("Error: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn sync_now(&mut self) -> Result<()> {
+        self.status_message = "Syncing...".to_string();
+        match self.client.call("sync.sync", None).await {
+            Ok(result) => {
+                let pulled = result.get("pulled").and_then(|v| v.as_bool()).unwrap_or(false);
+                let pushed = result.get("pushed").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                self.status_message = match (pulled, pushed) {
+                    (true, true) => "Sync complete (Pulled & Pushed)".to_string(),
+                    (true, false) => "Sync complete (Pulled)".to_string(),
+                    (false, true) => "Sync complete (Pushed)".to_string(),
+                    (false, false) => "Sync complete (Already up to date)".to_string(),
+                };
+                self.refresh_all().await?;
+            }
+            Err(e) => {
+                self.status_message = format!("Sync failed: {}", e);
             }
         }
         Ok(())

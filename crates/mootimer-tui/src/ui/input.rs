@@ -12,9 +12,10 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
 
     let is_dual_field =
         app.input_mode == InputMode::NewTask || app.input_mode == InputMode::EditTask;
+    let is_quick_add = app.input_mode == InputMode::QuickAddTask;
 
     let width = 60;
-    let height = if is_dual_field { 9 } else { 3 };
+    let height = if is_dual_field { 9 } else { 5 };
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
 
@@ -89,8 +90,10 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
         };
         f.set_cursor_position((cursor_x, cursor_y));
     } else {
-        let title = if app.status_message.is_empty() {
-            "Input"
+        let title = if is_quick_add {
+            " 🆕 Quick Add Task "
+        } else if app.status_message.is_empty() {
+            " Input "
         } else {
             &app.status_message
         };
@@ -100,12 +103,24 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
             .title(title)
             .border_style(Style::default().fg(Color::Cyan));
 
-        let input = Paragraph::new(app.input_buffer.as_str()).block(block);
-        f.render_widget(input, modal_area);
+        let inner = block.inner(modal_area);
+        f.render_widget(block, modal_area);
+
+        let input = Paragraph::new(app.input_buffer.as_str());
+        f.render_widget(input, Rect::new(inner.x, inner.y, inner.width, 1));
+
+        let instructions = Paragraph::new(Line::from(vec![ratatui::text::Span::styled(
+            " [Enter] Submit  [Esc] Cancel ",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        f.render_widget(
+            instructions,
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
 
         let cursor_x =
-            (modal_area.x + 1 + app.input_buffer.len() as u16).min(modal_area.x + width - 2);
-        let cursor_y = modal_area.y + 1;
+            (inner.x + app.input_buffer.len() as u16).min(inner.x + inner.width - 1);
+        let cursor_y = inner.y;
         f.set_cursor_position((cursor_x, cursor_y));
     }
 }

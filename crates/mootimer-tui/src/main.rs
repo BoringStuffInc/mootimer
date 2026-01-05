@@ -673,6 +673,10 @@ async fn handle_dashboard_keys(
                 app.refresh_all().await?;
                 app.status_message = "Refreshed!".to_string();
             }
+            KeyCode::Char('m') => {
+                app.status_message = "MOOOOO! 🐮".to_string();
+                audio_alert(app);
+            }
             _ => {}
         },
         DashboardPane::TasksList => match code {
@@ -714,6 +718,11 @@ async fn handle_dashboard_keys(
                 app.input_buffer_2.clear();
                 app.focused_input_field = 0;
                 app.status_message = "New Task".to_string();
+            }
+            KeyCode::Char('N') if modifiers.contains(KeyModifiers::SHIFT) => {
+                app.input_mode = InputMode::QuickAddTask;
+                app.input_buffer.clear();
+                app.status_message = "Quick Add Task:".to_string();
             }
             KeyCode::Char('v') => {
                 app.show_task_description = !app.show_task_description;
@@ -772,6 +781,10 @@ async fn handle_dashboard_keys(
                 app.refresh_all().await?;
                 app.status_message = "Refreshed!".to_string();
             }
+            KeyCode::Char('m') => {
+                app.status_message = "MOOOOO! 🐮".to_string();
+                audio_alert(app);
+            }
             _ => {}
         },
         DashboardPane::ProfileList => match code {
@@ -802,6 +815,10 @@ async fn handle_dashboard_keys(
                 app.input_mode = InputMode::RenameProfile;
                 app.input_buffer.clear();
                 app.status_message = "Enter new profile name:".to_string();
+            }
+            KeyCode::Char('m') => {
+                app.status_message = "MOOOOO! 🐮".to_string();
+                audio_alert(app);
             }
             _ => {}
         },
@@ -864,6 +881,11 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
             app.input_buffer_2.clear();
             app.focused_input_field = 0;
             app.status_message = "New Task".to_string();
+        }
+        KeyCode::Char('N') if modifiers.contains(KeyModifiers::SHIFT) => {
+            app.input_mode = InputMode::QuickAddTask;
+            app.input_buffer.clear();
+            app.status_message = "Quick Add Task:".to_string();
         }
         KeyCode::Char('v') => {
             app.show_task_description = !app.show_task_description;
@@ -959,6 +981,10 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
                 app.start_selected_timer().await?;
             }
         }
+        KeyCode::Char('m') => {
+            app.status_message = "MOOOOO! 🐮".to_string();
+            audio_alert(app);
+        }
         _ => {}
     }
     Ok(())
@@ -1035,6 +1061,7 @@ async fn handle_settings_keys(app: &mut App, code: KeyCode) -> Result<()> {
                 SettingsItem::CowModal => app.toggle_cow_modal(),
                 SettingsItem::SyncAutoCommit => app.toggle_git_sync().await?,
                 SettingsItem::SyncInitRepo => app.init_git_sync().await?,
+                SettingsItem::SyncNow => app.sync_now().await?,
                 SettingsItem::PomodoroWork => {
                     app.input_mode = InputMode::ConfigPomodoro;
                     app.input_buffer.clear();
@@ -1141,6 +1168,10 @@ async fn handle_logs_keys(app: &mut App, code: KeyCode) -> Result<()> {
                 app.log_lines.clear();
                 app.status_message = "Logs cleared".to_string();
             }
+        }
+        KeyCode::Char('m') => {
+            app.status_message = "MOOOOO! 🐮".to_string();
+            audio_alert(app);
         }
         _ => {}
     }

@@ -27,13 +27,7 @@ pub fn draw_reports(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
-    let stats = match app.report_period.as_str() {
-        "week" => &app.stats_week,
-        "month" => &app.stats_month,
-        _ => &app.stats_today,
-    };
-
-    let report_text = if let Some(stats) = stats {
+    let report_text = if let Some(stats) = &app.report_stats {
         let total_secs = stats
             .get("total_duration_seconds")
             .and_then(|v| v.as_u64())

@@ -182,6 +182,31 @@ pub fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                         },
                     ])
                 }
+                SettingsItem::SyncNow => {
+                    let initialized = app
+                        .sync_status
+                        .as_ref()
+                        .and_then(|s| s.get("initialized"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    Line::from(vec![
+                        Span::styled(
+                            "Sync Now        ",
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                        if initialized {
+                            Span::raw("Ready")
+                        } else {
+                            Span::styled("Not Initialized", Style::default().fg(Color::Red))
+                        },
+                        if is_selected && initialized {
+                            Span::raw("  <[Enter] to sync>")
+                        } else {
+                            Span::raw("")
+                        },
+                    ])
+                }
             };
             ListItem::new(line).style(style)
         })

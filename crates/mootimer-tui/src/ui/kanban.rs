@@ -51,10 +51,7 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .enumerate()
                 .map(|(j, task)| {
-                    let title = task
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Untitled");
+                    let title = task.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
                     let is_card_selected = is_col_selected && app.selected_kanban_card_index == j;
 
                     let style = if is_card_selected {
@@ -66,7 +63,26 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(*color)
                     };
 
-                    let mut lines = vec![Line::from(format!(" {} ", title))];
+                    let line = if is_card_selected && !app.show_archived {
+                        let left_arrow = if *col_idx > 0 { "←[H] " } else { "     " };
+                        let right_arrow = if *col_idx < 2 { " [L]→" } else { "     " };
+
+                        let available_width = (chunks[i].width as usize).saturating_sub(2);
+                        let title_width = title.chars().count();
+                        let padding_total = available_width.saturating_sub(5 + 5 + title_width);
+                        let padding_str = " ".repeat(padding_total);
+
+                        Line::from(vec![
+                            Span::raw(left_arrow),
+                            Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
+                            Span::raw(padding_str),
+                            Span::raw(right_arrow),
+                        ])
+                    } else {
+                        Line::from(format!(" {} ", title))
+                    };
+
+                    let mut lines = vec![line];
 
                     if app.show_task_description
                         && let Some(desc) = task.get("description").and_then(|v| v.as_str())

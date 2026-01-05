@@ -75,6 +75,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     match app.input_mode {
         InputMode::NewTask
+        | InputMode::QuickAddTask
         | InputMode::EditTask
         | InputMode::SearchTasks
         | InputMode::FilterEntries
@@ -189,6 +190,7 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
         Line::from("    [4]          Reports (📈)"),
         Line::from("    [5]          Settings (⚙️)"),
         Line::from("    [6]          System Logs (📋)"),
+        Line::from("    [m]          Moo! (🐮)"),
         Line::from("    [?]          Toggle this Help"),
         Line::from("    [q] / [Esc]  Quit MooTimer"),
         Line::from(""),
@@ -210,7 +212,8 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("    [n]          Create New Task (Step 1: Title, Step 2: Description)"),
+        Line::from("    [n]          Create New Task (Full: Title + Description)"),
+        Line::from("    [N]          Quick Add Task (Title only)"),
         Line::from("    [e]          Edit Selected Task Title"),
         Line::from("    [d]          Delete Selected Task"),
         Line::from("    [a]          Archive / Restore Selected Task"),
@@ -229,6 +232,8 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
         Line::from("    [h/l]        Switch Column (To Do / In Progress / Done)"),
         Line::from("    [j/k]        Navigate Cards in Column"),
         Line::from("    [Shift+h/l]  Move Card to Adjacent Column"),
+        Line::from("    [n]          Create New Task (Full)"),
+        Line::from("    [N]          Quick Add Task (Title only)"),
         Line::from("    [a]          Archive / Restore Selected Card"),
         Line::from("    [Shift+A]    Toggle View: Active vs. Archived Cards"),
         Line::from("    [v]          Toggle Card Descriptions"),
@@ -310,9 +315,14 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let status_content = if !app.status_message.is_empty() {
+        let bg_color = if app.status_message.contains("MOO") {
+            Color::Magenta
+        } else {
+            Color::Yellow
+        };
         Span::styled(
             format!(" {} ", app.status_message),
-            Style::default().fg(Color::Black).bg(Color::Yellow),
+            Style::default().fg(Color::Black).bg(bg_color),
         )
     } else {
         match app.input_mode {
@@ -341,13 +351,52 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::Gray),
     );
 
-    let status_line = Line::from(vec![
+    let sync_info = if let Some(sync) = &app.sync_status {
+        let initialized = sync.get("initialized").and_then(|v| v.as_bool()).unwrap_or(false);
+        if initialized {
+            let ahead = sync.get("ahead").and_then(|v| v.as_u64()).unwrap_or(0);
+            let behind = sync.get("behind").and_then(|v| v.as_u64()).unwrap_or(0);
+            let changes = sync.get("has_changes").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            let mut sync_spans = vec![Span::raw(" │ ")];
+
+            if ahead > 0 || behind > 0 || changes {
+                let mut details = Vec::new();
+                if ahead > 0 { details.push(format!("↑{}", ahead)); }
+                if behind > 0 { details.push(format!("↓{}", behind)); }
+                if changes { details.push("*".to_string()); }
+
+                sync_spans.push(Span::styled(
+                    format!(" ☁ {} ", details.join(" ")),
+                    Style::default().fg(Color::Yellow),
+                ));
+            } else {
+                sync_spans.push(Span::styled(
+                    " ☁ ok ",
+                    Style::default().fg(Color::Green),
+                ));
+            }
+            sync_spans
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let mut status_spans = vec![
         left_info,
         Span::raw(" │ "),
         center_info,
         Span::raw(" │ "),
         status_content,
-    ]);
+    ];
+
+    if !sync_info.is_empty() {
+        status_spans.extend(sync_info);
+    }
+
+    let status_line = Line::from(status_spans);
 
     let status = Paragraph::new(status_line)
         .alignment(Alignment::Left)
