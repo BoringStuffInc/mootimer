@@ -1,7 +1,3 @@
-//! MooTimer Client Library
-//!
-//! Provides a client for communicating with the MooTimer daemon via Unix sockets.
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +7,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::UnixStream;
 use tokio::sync::{Mutex, RwLock, mpsc};
 
-/// JSON-RPC 2.0 Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     jsonrpc: String,
@@ -20,7 +15,6 @@ pub struct Request {
     pub id: RequestId,
 }
 
-/// JSON-RPC 2.0 Response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     jsonrpc: String,
@@ -31,7 +25,6 @@ pub struct Response {
     pub id: RequestId,
 }
 
-/// JSON-RPC 2.0 Error object
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseError {
     pub code: i32,
@@ -40,7 +33,6 @@ pub struct ResponseError {
     pub data: Option<Value>,
 }
 
-/// JSON-RPC 2.0 Notification (no id field)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notification {
     pub jsonrpc: String,
@@ -48,7 +40,6 @@ pub struct Notification {
     pub params: Value,
 }
 
-/// Request ID (can be string, number, or null)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum RequestId {
@@ -68,13 +59,11 @@ impl Request {
     }
 }
 
-/// Persistent connection state
 struct PersistentConnection {
     writer: Arc<Mutex<BufWriter<tokio::io::WriteHalf<UnixStream>>>>,
     pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>>,
 }
 
-/// MooTimer daemon client
 pub struct MooTimerClient {
     socket_path: String,
     request_counter: std::sync::atomic::AtomicI64,
@@ -93,22 +82,18 @@ impl MooTimerClient {
     pub async fn subscribe_notifications(&self) -> Result<mpsc::Receiver<Notification>> {
         let mut conn_lock = self.persistent_conn.lock().await;
 
-        // If already connected, return error
         if conn_lock.is_some() {
             anyhow::bail!("Already subscribed to notifications");
         }
 
-        // Connect to daemon
         let stream = self.connect().await?;
         let (read_half, write_half) = tokio::io::split(stream);
         let writer = Arc::new(Mutex::new(BufWriter::new(write_half)));
 
-        // Create channels
         let (notif_tx, notif_rx) = mpsc::channel::<Notification>(100);
-        let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> =
+        let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> = 
             Arc::new(RwLock::new(HashMap::new()));
 
-        // Spawn background task to read messages
         let pending_clone = pending_responses.clone();
         let notif_tx_clone = notif_tx.clone();
         tokio::spawn(async move {
@@ -118,14 +103,11 @@ impl MooTimerClient {
             loop {
                 line.clear();
                 match reader.read_line(&mut line).await {
-                    Ok(0) | Err(_) => break, // Connection closed
+                    Ok(0) | Err(_) => break,
                     Ok(_) => {
-                        // Try to parse as notification first (no id field)
                         if let Ok(notification) = serde_json::from_str::<Notification>(&line) {
                             let _ = notif_tx_clone.send(notification).await;
-                        }
-                        // Otherwise try as response (has id field)
-                        else if let Ok(response) = serde_json::from_str::<Response>(&line)
+                        } else if let Ok(response) = serde_json::from_str::<Response>(&line)
                             && let RequestId::Number(id) = response.id
                         {
                             let pending = pending_clone.read().await;
@@ -138,7 +120,6 @@ impl MooTimerClient {
             }
         });
 
-        // Store persistent connection
         *conn_lock = Some(PersistentConnection {
             writer,
             pending_responses,
@@ -172,16 +153,13 @@ impl MooTimerClient {
                 anyhow::bail!("Invalid request ID");
             };
 
-            // Create response channel
             let (tx, mut rx) = mpsc::channel::<Response>(1);
 
-            // Register for response
             {
                 let mut pending = conn.pending_responses.write().await;
                 pending.insert(request_id, tx);
             }
 
-            // Send request
             {
                 let mut writer = conn.writer.lock().await;
                 let request_json = serde_json::to_string(&request)?;
@@ -190,19 +168,16 @@ impl MooTimerClient {
                 writer.flush().await?;
             }
 
-            // Wait for response
             let response = rx
                 .recv()
                 .await
                 .ok_or_else(|| anyhow::anyhow!("No response received"))?;
 
-            // Cleanup
             {
                 let mut pending = conn.pending_responses.write().await;
                 pending.remove(&request_id);
             }
 
-            // Check for error
             if let Some(error) = response.error {
                 anyhow::bail!("RPC error {}: {}", error.code, error.message);
             }
@@ -210,7 +185,6 @@ impl MooTimerClient {
             return Ok(response.result.unwrap_or(Value::Null));
         }
 
-        // Fallback to one-shot connection
         let _ = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -231,20 +205,17 @@ impl MooTimerClient {
         let mut stream = self.connect().await?;
         let request = Request::new(method, params, self.next_id());
 
-        // Send request
         let request_json = serde_json::to_string(&request)?;
         stream.write_all(request_json.as_bytes()).await?;
         stream.write_all(b"\n").await?;
         stream.flush().await?;
 
-        // Read response
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
         reader.read_line(&mut line).await?;
 
         let response: Response = serde_json::from_str(&line)?;
 
-        // Check for error
         if let Some(error) = response.error {
             anyhow::bail!("RPC error {}: {}", error.code, error.message);
         }
@@ -266,8 +237,6 @@ impl MooTimerClient {
     pub async fn call(&self, method: impl Into<String>, params: Option<Value>) -> Result<Value> {
         self.call_persistent(method, params).await
     }
-
-    // Timer methods
 
     pub async fn timer_start_manual(
         &self,
@@ -295,10 +264,9 @@ impl MooTimerClient {
             "task_id": task_id,
         });
 
-        // If custom duration provided, create config override with JUST that field
         if let Some(duration) = work_duration_minutes {
             params["config"] = serde_json::json!({
-                "work_duration": duration * 60, // Convert minutes to seconds
+                "work_duration": duration * 60,
             });
         }
 
@@ -376,8 +344,6 @@ impl MooTimerClient {
         self.call("timer.list", None).await
     }
 
-    // Profile methods
-
     pub async fn profile_create(
         &self,
         id: &str,
@@ -428,8 +394,6 @@ impl MooTimerClient {
         )
         .await
     }
-
-    // Task methods
 
     pub async fn task_create(
         &self,
@@ -490,8 +454,6 @@ impl MooTimerClient {
         )
         .await
     }
-
-    // Entry methods
 
     pub async fn entry_list(&self, profile_id: &str) -> Result<Value> {
         self.call(
@@ -565,8 +527,6 @@ impl MooTimerClient {
         )
         .await
     }
-
-    // Sync methods
 
     pub async fn sync_status(&self) -> Result<Value> {
         self.call("sync.status", None).await

@@ -1635,7 +1635,6 @@ async fn main() -> Result<()> {
             }
             // Input events
             _ = tokio::time::sleep(Duration::from_millis(16)) => {
-                // Update tomato animation (approx 30ms tick rate)
                 if last_tick.elapsed() >= Duration::from_millis(30) {
                     app.tomato_state.tick();
                     last_tick = std::time::Instant::now();

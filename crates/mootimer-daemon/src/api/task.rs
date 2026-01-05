@@ -1,5 +1,3 @@
-//! Task API methods
-
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -39,7 +37,6 @@ struct SearchTasksParams {
     query: String,
 }
 
-/// Create a new task
 pub async fn create(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
     let params: CreateTaskParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -65,7 +62,6 @@ pub async fn create(manager: &Arc<TaskManager>, params: Option<Value>) -> Result
     Ok(serde_json::to_value(&created)?)
 }
 
-/// Get a task
 pub async fn get(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
     let params: TaskIdParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -79,7 +75,6 @@ pub async fn get(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Va
     Ok(serde_json::to_value(&task)?)
 }
 
-/// List all tasks for a profile
 pub async fn list(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
     let params: ListTasksParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -93,7 +88,6 @@ pub async fn list(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<V
     Ok(serde_json::to_value(&tasks)?)
 }
 
-/// Update a task
 pub async fn update(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
     let params: UpdateTaskParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -107,7 +101,6 @@ pub async fn update(manager: &Arc<TaskManager>, params: Option<Value>) -> Result
     Ok(serde_json::to_value(&updated)?)
 }
 
-/// Delete a task
 pub async fn delete(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
     let params: TaskIdParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -123,7 +116,6 @@ pub async fn delete(manager: &Arc<TaskManager>, params: Option<Value>) -> Result
     }))
 }
 
-/// Search tasks
 pub async fn search(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
     let params: SearchTasksParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
