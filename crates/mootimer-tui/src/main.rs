@@ -24,9 +24,10 @@ use tracing::info;
 
 /// Set up file logging
 fn setup_logging() -> Result<()> {
-    let log_file = std::fs::File::create(
-        "/home/duck/.gemini/tmp/dccb9dfa09aee1693ef11b264ae0322f74f1baf3fffd2c0cd355e5f6a9d406fc/mootimer-tui.log",
-    )?;
+    let mut log_path = std::env::temp_dir();
+    log_path.push("mootimer-tui.log");
+    
+    let log_file = std::fs::File::create(log_path)?;
     let subscriber = tracing_subscriber::fmt()
         .with_writer(log_file)
         .with_env_filter("mootimer_tui=trace")
