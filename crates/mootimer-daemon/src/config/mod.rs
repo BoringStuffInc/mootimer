@@ -1,4 +1,3 @@
-//! Configuration management module
 
 pub mod manager;
 

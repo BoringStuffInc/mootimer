@@ -1,4 +1,3 @@
-//! Task data model
 
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
@@ -62,7 +61,6 @@ impl Task {
             return Err(Error::Validation("Task ID cannot be empty".to_string()));
         }
 
-        // Validate URL format if present
         if let Some(ref url) = self.url
             && !url.starts_with("http://")
             && !url.starts_with("https://")
@@ -213,7 +211,6 @@ mod tests {
         assert!(task.has_tag("backend"));
         assert!(task.has_tag("urgent"));
 
-        // Adding duplicate tag should not increase count
         task.add_tag("backend".to_string());
         assert_eq!(task.tags.len(), 2);
 

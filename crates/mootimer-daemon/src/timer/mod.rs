@@ -1,4 +1,3 @@
-//! Timer engine module
 
 pub mod engine;
 pub mod events;

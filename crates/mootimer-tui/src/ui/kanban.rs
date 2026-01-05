@@ -17,59 +17,75 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    let columns = [
-        ("To Do", 0, Color::Red),
-        ("In Progress", 1, Color::Yellow),
-        ("Done", 2, Color::Green),
-    ];
+    let columns = if app.show_archived {
+        vec![
+            ("Archived", 0, Color::Red),
+            ("", 1, Color::DarkGray),
+            ("", 2, Color::DarkGray),
+        ]
+    } else {
+        vec![
+            ("To Do", 0, Color::Red),
+            ("In Progress", 1, Color::Yellow),
+            ("Done", 2, Color::Green),
+        ]
+    };
+
+    let arch_hint = if app.show_archived { "Rest" } else { "Arch" };
+    let bottom_hint = format!(" [h/l]Col [j/k]Card [H/L]Move [a]{} [A]View [v]Desc ", arch_hint);
 
     for (i, (title, col_idx, color)) in columns.iter().enumerate() {
         let is_col_selected = app.selected_column_index == *col_idx;
-
         let tasks = app.get_kanban_tasks(*col_idx);
 
-        let items: Vec<ListItem> = tasks
-            .iter()
-            .enumerate()
-            .map(|(j, task)| {
-                let title = task
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Untitled");
-                let is_card_selected = is_col_selected && app.selected_kanban_card_index == j;
+        let items: Vec<ListItem> = if tasks.is_empty() {
+            vec![ListItem::new(Line::from(Span::styled(
+                " (empty)",
+                Style::default().fg(Color::DarkGray),
+            )))]
+        } else {
+            tasks
+                .iter()
+                .enumerate()
+                .map(|(j, task)| {
+                    let title = task
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Untitled");
+                    let is_card_selected = is_col_selected && app.selected_kanban_card_index == j;
 
-                let style = if is_card_selected {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(*color)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(*color)
-                };
-
-                let mut lines = vec![Line::from(format!(" {} ", title))];
-
-                if app.show_task_description
-                    && let Some(desc) = task.get("description").and_then(|v| v.as_str())
-                    && !desc.trim().is_empty()
-                {
-                    // Contrast logic for selected card (black text on colored bg)
-                    let desc_style = if is_card_selected {
+                    let style = if is_card_selected {
                         Style::default()
                             .fg(Color::Black)
-                            .add_modifier(Modifier::ITALIC)
+                            .bg(*color)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC)
+                        Style::default().fg(*color)
                     };
 
-                    lines.push(Line::from(Span::styled(format!("   {}", desc), desc_style)));
-                }
+                    let mut lines = vec![Line::from(format!(" {} ", title))];
 
-                ListItem::new(lines).style(style)
-            })
-            .collect();
+                    if app.show_task_description
+                        && let Some(desc) = task.get("description").and_then(|v| v.as_str())
+                        && !desc.trim().is_empty()
+                    {
+                        let desc_style = if is_card_selected {
+                            Style::default()
+                                .fg(Color::Black)
+                                .add_modifier(Modifier::ITALIC)
+                        } else {
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC)
+                        };
+
+                        lines.push(Line::from(Span::styled(format!("   {}", desc), desc_style)));
+                    }
+
+                    ListItem::new(lines).style(style)
+                })
+                .collect()
+        };
 
         let border_style = if is_col_selected {
             Style::default().fg(*color).add_modifier(Modifier::BOLD)
@@ -79,13 +95,15 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
 
         let block_title = format!(" {} ({}) ", title, tasks.len());
 
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(block_title)
-                .border_style(border_style),
-        );
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .title(block_title)
+            .border_style(border_style);
+        
+        if is_col_selected {
+            block = block.title_bottom(Line::from(bottom_hint.as_str()).right_aligned());
+        }
 
-        f.render_widget(list, chunks[i]);
+        f.render_widget(List::new(items).block(block), chunks[i]);
     }
 }

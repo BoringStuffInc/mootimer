@@ -12,7 +12,6 @@ pub fn draw_logs(f: &mut Frame, app: &mut App, area: Rect) {
         .log_lines
         .iter()
         .map(|line| {
-            // Color code by log level
             let colored_line = if line.contains("ERROR") {
                 Span::styled(line.clone(), Style::default().fg(Color::Red))
             } else if line.contains("WARN") {

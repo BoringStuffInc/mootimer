@@ -1,4 +1,3 @@
-//! Profile management module
 
 pub mod manager;
 

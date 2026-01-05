@@ -1,4 +1,3 @@
-//! Unified event system for all daemon events
 
 use chrono::{DateTime, Utc};
 use mootimer_core::models::{Entry, Profile, Task};
@@ -6,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::timer::TimerEvent;
 
-/// Unified event type for all daemon events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "category", rename_all = "snake_case")]
 pub enum DaemonEvent {
@@ -16,7 +14,6 @@ pub enum DaemonEvent {
     Profile(ProfileEvent),
 }
 
-/// Task-related event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskEvent {
     pub event_type: TaskEventType,
@@ -26,7 +23,6 @@ pub struct TaskEvent {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Types of task events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TaskEventType {
@@ -36,7 +32,6 @@ pub enum TaskEventType {
 }
 
 impl TaskEvent {
-    /// Create a new task created event
     pub fn created(profile_id: String, task: Task) -> Self {
         Self {
             event_type: TaskEventType::Created,
@@ -46,7 +41,6 @@ impl TaskEvent {
         }
     }
 
-    /// Create a new task updated event
     pub fn updated(profile_id: String, task: Task) -> Self {
         Self {
             event_type: TaskEventType::Updated,
@@ -56,7 +50,6 @@ impl TaskEvent {
         }
     }
 
-    /// Create a new task deleted event
     pub fn deleted(profile_id: String, task_id: String) -> Self {
         Self {
             event_type: TaskEventType::Deleted { task_id },
@@ -67,7 +60,6 @@ impl TaskEvent {
     }
 }
 
-/// Entry-related event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryEvent {
     pub event_type: EntryEventType,
@@ -77,7 +69,6 @@ pub struct EntryEvent {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Types of entry events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EntryEventType {
@@ -87,7 +78,6 @@ pub enum EntryEventType {
 }
 
 impl EntryEvent {
-    /// Create a new entry added event
     pub fn added(profile_id: String, entry: Entry) -> Self {
         Self {
             event_type: EntryEventType::Added,
@@ -97,7 +87,6 @@ impl EntryEvent {
         }
     }
 
-    /// Create a new entry updated event
     pub fn updated(profile_id: String, entry: Entry) -> Self {
         Self {
             event_type: EntryEventType::Updated,
@@ -107,7 +96,6 @@ impl EntryEvent {
         }
     }
 
-    /// Create a new entry deleted event
     pub fn deleted(profile_id: String, entry_id: String) -> Self {
         Self {
             event_type: EntryEventType::Deleted { entry_id },
@@ -118,7 +106,6 @@ impl EntryEvent {
     }
 }
 
-/// Profile-related event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileEvent {
     pub event_type: ProfileEventType,
@@ -127,7 +114,6 @@ pub struct ProfileEvent {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Types of profile events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProfileEventType {
@@ -137,7 +123,6 @@ pub enum ProfileEventType {
 }
 
 impl ProfileEvent {
-    /// Create a new profile created event
     pub fn created(profile: Profile) -> Self {
         Self {
             event_type: ProfileEventType::Created,
@@ -146,7 +131,6 @@ impl ProfileEvent {
         }
     }
 
-    /// Create a new profile updated event
     pub fn updated(profile: Profile) -> Self {
         Self {
             event_type: ProfileEventType::Updated,
@@ -155,7 +139,6 @@ impl ProfileEvent {
         }
     }
 
-    /// Create a new profile deleted event
     pub fn deleted(profile_id: String) -> Self {
         Self {
             event_type: ProfileEventType::Deleted { profile_id },

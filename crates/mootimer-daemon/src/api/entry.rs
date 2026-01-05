@@ -1,4 +1,3 @@
-//! Entry API methods
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -40,7 +39,6 @@ struct UpdateEntryParams {
     entry: mootimer_core::models::Entry,
 }
 
-/// Delete an entry
 pub async fn delete(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: DeleteEntryParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -54,7 +52,6 @@ pub async fn delete(manager: &Arc<EntryManager>, params: Option<Value>) -> Resul
     Ok(json!({ "status": "deleted", "id": params.entry_id }))
 }
 
-/// Update an entry
 pub async fn update(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: UpdateEntryParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -68,7 +65,6 @@ pub async fn update(manager: &Arc<EntryManager>, params: Option<Value>) -> Resul
     Ok(json!({ "status": "updated" }))
 }
 
-/// List all entries for a profile
 pub async fn list(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: ListEntriesParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -82,7 +78,6 @@ pub async fn list(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<
     Ok(serde_json::to_value(&entries)?)
 }
 
-/// Filter entries
 pub async fn filter(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: FilterEntriesParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -103,7 +98,6 @@ pub async fn filter(manager: &Arc<EntryManager>, params: Option<Value>) -> Resul
     Ok(serde_json::to_value(&entries)?)
 }
 
-/// Get today's entries
 pub async fn get_today(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: StatsParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -117,7 +111,6 @@ pub async fn get_today(manager: &Arc<EntryManager>, params: Option<Value>) -> Re
     Ok(serde_json::to_value(&entries)?)
 }
 
-/// Get this week's entries
 pub async fn get_week(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: StatsParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -131,7 +124,6 @@ pub async fn get_week(manager: &Arc<EntryManager>, params: Option<Value>) -> Res
     Ok(serde_json::to_value(&entries)?)
 }
 
-/// Get this month's entries
 pub async fn get_month(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: StatsParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -145,7 +137,6 @@ pub async fn get_month(manager: &Arc<EntryManager>, params: Option<Value>) -> Re
     Ok(serde_json::to_value(&entries)?)
 }
 
-/// Get today's statistics
 pub async fn stats_today(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: StatsParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -166,7 +157,6 @@ pub async fn stats_today(manager: &Arc<EntryManager>, params: Option<Value>) -> 
     }))
 }
 
-/// Get this week's statistics
 pub async fn stats_week(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: StatsParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -187,7 +177,6 @@ pub async fn stats_week(manager: &Arc<EntryManager>, params: Option<Value>) -> R
     }))
 }
 
-/// Get this month's statistics
 pub async fn stats_month(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {
     let params: StatsParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -208,7 +197,6 @@ pub async fn stats_month(manager: &Arc<EntryManager>, params: Option<Value>) -> 
     }))
 }
 
-/// Get today's entries across all profiles
 pub async fn get_today_all_profiles(
     entry_manager: &Arc<EntryManager>,
     profile_manager: &Arc<ProfileManager>,
@@ -227,7 +215,6 @@ pub async fn get_today_all_profiles(
             .await
             .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
 
-        // Add profile_id to each entry
         for entry in entries {
             let mut entry_value = serde_json::to_value(&entry)?;
             if let Some(obj) = entry_value.as_object_mut() {
@@ -240,7 +227,6 @@ pub async fn get_today_all_profiles(
     Ok(json!(all_entries))
 }
 
-/// Get this week's entries across all profiles
 pub async fn get_week_all_profiles(
     entry_manager: &Arc<EntryManager>,
     profile_manager: &Arc<ProfileManager>,
@@ -259,7 +245,6 @@ pub async fn get_week_all_profiles(
             .await
             .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
 
-        // Add profile_id to each entry
         for entry in entries {
             let mut entry_value = serde_json::to_value(&entry)?;
             if let Some(obj) = entry_value.as_object_mut() {
@@ -272,7 +257,6 @@ pub async fn get_week_all_profiles(
     Ok(json!(all_entries))
 }
 
-/// Get this month's entries across all profiles
 pub async fn get_month_all_profiles(
     entry_manager: &Arc<EntryManager>,
     profile_manager: &Arc<ProfileManager>,
@@ -291,7 +275,6 @@ pub async fn get_month_all_profiles(
             .await
             .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
 
-        // Add profile_id to each entry
         for entry in entries {
             let mut entry_value = serde_json::to_value(&entry)?;
             if let Some(obj) = entry_value.as_object_mut() {

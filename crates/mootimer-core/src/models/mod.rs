@@ -1,4 +1,3 @@
-//! Data models for MooTimer
 
 pub mod config;
 pub mod entry;

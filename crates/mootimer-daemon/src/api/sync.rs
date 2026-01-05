@@ -1,4 +1,3 @@
-//! Sync API methods
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -18,7 +17,6 @@ struct CommitParams {
     message: String,
 }
 
-/// Initialize git repository
 pub async fn init(sync_manager: &Arc<SyncManager>, _params: Option<Value>) -> Result<Value> {
     sync_manager
         .init_repo()
@@ -30,7 +28,6 @@ pub async fn init(sync_manager: &Arc<SyncManager>, _params: Option<Value>) -> Re
     }))
 }
 
-/// Get sync status
 pub async fn status(
     sync_manager: &Arc<SyncManager>,
     config_manager: &Arc<ConfigManager>,
@@ -46,7 +43,6 @@ pub async fn status(
     Ok(serde_json::to_value(&status)?)
 }
 
-/// Perform sync (pull + push if configured)
 pub async fn sync(
     sync_manager: &Arc<SyncManager>,
     config_manager: &Arc<ConfigManager>,
@@ -62,7 +58,6 @@ pub async fn sync(
     Ok(serde_json::to_value(&result)?)
 }
 
-/// Manual commit
 pub async fn commit(sync_manager: &Arc<SyncManager>, params: Option<Value>) -> Result<Value> {
     let params: CommitParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -79,7 +74,6 @@ pub async fn commit(sync_manager: &Arc<SyncManager>, params: Option<Value>) -> R
     }))
 }
 
-/// Set remote URL
 pub async fn set_remote(sync_manager: &Arc<SyncManager>, params: Option<Value>) -> Result<Value> {
     let params: SetRemoteParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -133,14 +127,12 @@ mod tests {
         let manager = Arc::new(SyncManager::new().unwrap());
         manager.init_repo().await.unwrap();
 
-        // Create a file to commit
         let data_dir = init_data_dir().unwrap();
         std::fs::write(data_dir.join("test.txt"), "Hello").unwrap();
 
         let params = json!({ "message": "Test commit" });
         let result = commit(&manager, Some(params)).await.unwrap();
 
-        // Status should be either "committed" or "no_changes" depending on test isolation
         let status = result.get("status").unwrap().as_str().unwrap();
         assert!(status == "committed" || status == "no_changes");
         assert!(result.get("commit_id").is_some());

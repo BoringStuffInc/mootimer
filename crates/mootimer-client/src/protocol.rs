@@ -1,4 +1,3 @@
-//! JSON-RPC protocol definitions
 
 use serde::{Deserialize, Serialize};
 

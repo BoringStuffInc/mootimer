@@ -1,9 +1,7 @@
-//! JSON-RPC 2.0 protocol implementation
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// JSON-RPC 2.0 Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub jsonrpc: String,
@@ -12,7 +10,6 @@ pub struct Request {
     pub id: RequestId,
 }
 
-/// JSON-RPC 2.0 Response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub jsonrpc: String,
@@ -23,7 +20,6 @@ pub struct Response {
     pub id: RequestId,
 }
 
-/// JSON-RPC 2.0 Notification (server -> client)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notification {
     pub jsonrpc: String,
@@ -31,7 +27,6 @@ pub struct Notification {
     pub params: Value,
 }
 
-/// Request ID (can be string, number, or null)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(untagged)]
 pub enum RequestId {
@@ -40,7 +35,6 @@ pub enum RequestId {
     Null,
 }
 
-/// JSON-RPC Error
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcError {
     pub code: i32,
@@ -50,7 +44,6 @@ pub struct JsonRpcError {
 }
 
 impl JsonRpcError {
-    /// Parse error (-32700)
     pub fn parse_error(message: impl Into<String>) -> Self {
         Self {
             code: -32700,
@@ -59,7 +52,6 @@ impl JsonRpcError {
         }
     }
 
-    /// Invalid request (-32600)
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self {
             code: -32600,
@@ -68,7 +60,6 @@ impl JsonRpcError {
         }
     }
 
-    /// Method not found (-32601)
     pub fn method_not_found(method: &str) -> Self {
         Self {
             code: -32601,
@@ -77,7 +68,6 @@ impl JsonRpcError {
         }
     }
 
-    /// Invalid params (-32602)
     pub fn invalid_params(message: impl Into<String>) -> Self {
         Self {
             code: -32602,
@@ -86,7 +76,6 @@ impl JsonRpcError {
         }
     }
 
-    /// Internal error (-32603)
     pub fn internal_error(message: impl Into<String>) -> Self {
         Self {
             code: -32603,
@@ -95,7 +84,6 @@ impl JsonRpcError {
         }
     }
 
-    /// Custom application error
     pub fn application_error(code: i32, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -106,7 +94,6 @@ impl JsonRpcError {
 }
 
 impl Request {
-    /// Create a new request
     pub fn new(method: String, params: Option<Value>, id: RequestId) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -116,7 +103,6 @@ impl Request {
         }
     }
 
-    /// Validate the request
     pub fn validate(&self) -> Result<(), JsonRpcError> {
         if self.jsonrpc != "2.0" {
             return Err(JsonRpcError::invalid_request("Invalid JSON-RPC version"));
@@ -126,7 +112,6 @@ impl Request {
 }
 
 impl Response {
-    /// Create a success response
     pub fn success(result: Value, id: RequestId) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -136,7 +121,6 @@ impl Response {
         }
     }
 
-    /// Create an error response
     pub fn error(error: JsonRpcError, id: RequestId) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -148,7 +132,6 @@ impl Response {
 }
 
 impl Notification {
-    /// Create a new notification
     pub fn new(method: String, params: Value) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),

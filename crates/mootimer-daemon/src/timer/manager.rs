@@ -22,12 +22,15 @@ pub enum TimerManagerError {
 
 pub type Result<T> = std::result::Result<T, TimerManagerError>;
 
+use crate::task::TaskManager;
+
 #[derive(Clone)]
 pub struct TimerManager {
     timers: Arc<RwLock<HashMap<String, Arc<TimerEngine>>>>,
     event_manager: Arc<EventManager>,
     event_tx: broadcast::Sender<TimerEvent>,
     completed_entries: Arc<RwLock<Vec<(String, Entry)>>>,
+    task_manager: Option<Arc<TaskManager>>,
 }
 
 impl TimerManager {
@@ -48,12 +51,27 @@ impl TimerManager {
             event_manager,
             event_tx,
             completed_entries,
+            task_manager: None,
         }
+    }
+
+    pub fn set_task_manager(&mut self, task_manager: Arc<TaskManager>) {
+        self.task_manager = Some(task_manager);
     }
 
     pub async fn take_completed_entries(&self) -> Vec<(String, Entry)> {
         let mut entries = self.completed_entries.write().await;
         std::mem::take(&mut *entries)
+    }
+
+    async fn get_task_title(&self, profile_id: &str, task_id: Option<&String>) -> Option<String> {
+        if let Some(tid) = task_id
+            && let Some(tm) = &self.task_manager
+        {
+            tm.get(profile_id, tid).await.ok().map(|t| t.title)
+        } else {
+            None
+        }
     }
 
     async fn handle_countdown_completion(
@@ -77,6 +95,7 @@ impl TimerManager {
             tracing::debug!("Got timer state");
             if let Ok(entry) = Entry::create_completed(
                 timer.task_id.clone(),
+                timer.task_title.clone(),
                 timer.start_time,
                 chrono::Utc::now(),
                 timer.mode,
@@ -95,8 +114,6 @@ impl TimerManager {
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<TimerEvent> {
-        // For backward compatibility, still return a TimerEvent receiver
-        // The event manager will handle broadcasting as DaemonEvent
         self.event_tx.subscribe()
     }
 
@@ -112,9 +129,12 @@ impl TimerManager {
             }
         }
 
+        let task_title = self.get_task_title(&profile_id, task_id.as_ref()).await;
+
         let engine = Arc::new(TimerEngine::new_manual(
             profile_id.clone(),
             task_id.clone(),
+            task_title,
             self.event_tx.clone(),
         ));
 
@@ -155,9 +175,12 @@ impl TimerManager {
             }
         }
 
+        let task_title = self.get_task_title(&profile_id, task_id.as_ref()).await;
+
         let engine = Arc::new(TimerEngine::new_pomodoro(
             profile_id.clone(),
             task_id.clone(),
+            task_title,
             config,
             self.event_tx.clone(),
         ));
@@ -199,9 +222,12 @@ impl TimerManager {
             }
         }
 
+        let task_title = self.get_task_title(&profile_id, task_id.as_ref()).await;
+
         let engine = Arc::new(TimerEngine::new_countdown(
             profile_id.clone(),
             task_id.clone(),
+            task_title,
             duration_minutes,
             self.event_tx.clone(),
         ));
@@ -250,7 +276,6 @@ impl TimerManager {
                 .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
         };
         tracing::debug!("get_timer: released read lock, calling engine.get_timer()");
-        // Lock released before calling engine.get_timer() to avoid deadlock
         let result = engine.get_timer().await;
         tracing::debug!("get_timer: engine.get_timer() returned");
         Ok(result)
@@ -261,7 +286,6 @@ impl TimerManager {
             let timers = self.timers.read().await;
             timers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
-        // Lock released before calling engine.get_timer() to avoid deadlock
         let mut result = HashMap::new();
         for (profile_id, engine) in engines {
             result.insert(profile_id, engine.get_timer().await);
@@ -278,7 +302,6 @@ impl TimerManager {
                 .cloned()
                 .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
         };
-        // Lock released before awaiting to avoid deadlock
         engine.pause().await?;
         Ok(())
     }
@@ -291,7 +314,6 @@ impl TimerManager {
                 .cloned()
                 .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
         };
-        // Lock released before awaiting to avoid deadlock
         engine.resume().await?;
         Ok(())
     }
@@ -306,6 +328,21 @@ impl TimerManager {
 
         let entry = engine.stop().await?;
         Ok(entry)
+    }
+
+    pub async fn stop_all(&self) -> Vec<(String, Entry)> {
+        let mut completed = Vec::new();
+        let profiles: Vec<String> = {
+            let timers = self.timers.read().await;
+            timers.keys().cloned().collect()
+        };
+
+        for profile_id in profiles {
+            if let Ok(entry) = self.stop(&profile_id).await {
+                completed.push((profile_id, entry));
+            }
+        }
+        completed
     }
 
     pub async fn cancel(&self, profile_id: &str) -> Result<()> {
@@ -440,7 +477,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Should receive started event
         let event = rx.recv().await.unwrap();
         match event.event_type {
             super::super::events::TimerEventType::Started { task_id, .. } => {
@@ -469,20 +505,17 @@ mod tests {
         let manager = create_manager();
         let mut rx = manager.subscribe();
 
-        // Start a 1-second countdown
         let _start_time = chrono::Utc::now();
         manager
             .start_countdown("profile1".to_string(), None, 1)
             .await
             .unwrap();
 
-        // Wait for events
         let mut countdown_completed = false;
         let mut timer_stopped = false;
         let start = std::time::Instant::now();
 
         while start.elapsed() < Duration::from_secs(70) {
-            // 1 minute countdown + buffer
             if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
             {
                 tracing::debug!("Received event: {:?}", event.event_type);
@@ -502,7 +535,6 @@ mod tests {
             }
         }
 
-        // After completion, the timer should be removed (with some tolerance for timing)
         sleep(Duration::from_millis(500)).await;
         let result = manager.get_timer("profile1").await;
 
@@ -512,7 +544,6 @@ mod tests {
                 "Timer should be removed after countdown completion"
             );
         } else {
-            // If we didn't see the events, at least verify get_timer works without deadlocking
             match result {
                 Ok(_timer) => tracing::debug!(
                     "Timer still active after {} seconds",

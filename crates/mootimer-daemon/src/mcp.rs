@@ -316,7 +316,7 @@ impl McpServer {
                     data: None,
                 });
             }
-        }; // This semicolon is important.
+        };
 
         let result_value = daemon_result.map_err(|e| JsonRpcError {
             code: -32000,
@@ -349,14 +349,12 @@ fn get_string_arg<'a>(args: &'a Value, key: &'a str) -> Result<&'a str, JsonRpcE
 
 pub async fn run_mcp_server(socket_path: String) -> Result<()> {
     tracing_subscriber::fmt()
-        .with_writer(io::stderr) // MCP logs to stderr
+        .with_writer(io::stderr)
         .with_env_filter("info")
         .init();
 
-    // Create client and verify daemon connection
     let client = Arc::new(MooTimerClient::new(socket_path));
 
-    // Test connection to daemon
     if let Err(e) = client.profile_list().await {
         anyhow::bail!(
             "Failed to connect to daemon: {}. Make sure the daemon is running with: mootimerd",

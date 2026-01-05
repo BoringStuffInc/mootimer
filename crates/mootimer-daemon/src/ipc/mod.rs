@@ -1,4 +1,3 @@
-//! IPC module for daemon communication
 
 pub mod connection;
 pub mod protocol;

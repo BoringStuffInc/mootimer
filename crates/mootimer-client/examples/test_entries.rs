@@ -1,4 +1,3 @@
-// Simple test to verify entry loading
 use mootimer_client::MooTimerClient;
 
 #[tokio::main]
@@ -22,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
             println!(
                 "  Entry {}: ID={}, Duration={}s, Mode={}, Task={}",
                 i + 1,
-                &id[..8], // Show first 8 chars of UUID
+                &id[..8],
                 duration,
                 mode,
                 if task_id.is_empty() {

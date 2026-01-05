@@ -1,33 +1,27 @@
-//! Central event management and broadcasting
 
 use tokio::sync::broadcast;
 
 use crate::events::{DaemonEvent, EntryEvent, ProfileEvent, TaskEvent};
 use crate::timer::TimerEvent;
 
-/// Central event manager that coordinates all daemon events
 pub struct EventManager {
     event_tx: broadcast::Sender<DaemonEvent>,
 }
 
 impl EventManager {
-    /// Create a new event manager with a broadcast channel
     pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel(1000);
         Self { event_tx }
     }
 
-    /// Subscribe to all daemon events
     pub fn subscribe(&self) -> broadcast::Receiver<DaemonEvent> {
         self.event_tx.subscribe()
     }
 
-    /// Emit a timer event
     pub fn emit_timer(&self, event: TimerEvent) {
         let _ = self.event_tx.send(DaemonEvent::Timer(event));
     }
 
-    /// Emit a task event
     pub fn emit_task(&self, event: TaskEvent) {
         tracing::info!(
             "EventManager: Broadcasting task event: {:?}",
@@ -42,12 +36,10 @@ impl EventManager {
         }
     }
 
-    /// Emit an entry event
     pub fn emit_entry(&self, event: EntryEvent) {
         let _ = self.event_tx.send(DaemonEvent::Entry(event));
     }
 
-    /// Emit a profile event
     pub fn emit_profile(&self, event: ProfileEvent) {
         let _ = self.event_tx.send(DaemonEvent::Profile(event));
     }
@@ -119,7 +111,6 @@ mod tests {
         let event = TaskEvent::created("profile1".to_string(), task);
         manager.emit_task(event);
 
-        // Both subscribers should receive the event
         let received1 = receiver1.recv().await.unwrap();
         let received2 = receiver2.recv().await.unwrap();
 

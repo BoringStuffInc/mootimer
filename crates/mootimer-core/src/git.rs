@@ -1,5 +1,3 @@
-//! Git operations for data synchronization
-
 use crate::{Error, Result};
 use git2::{
     Cred, FetchOptions, IndexAddOption, Oid, PushOptions, RemoteCallbacks, Repository, Signature,
@@ -7,18 +5,15 @@ use git2::{
 };
 use std::path::PathBuf;
 
-/// Git operations wrapper for MooTimer data directory
 pub struct GitOperations {
     repo_path: PathBuf,
 }
 
 impl GitOperations {
-    /// Create a new GitOperations instance
     pub fn new(repo_path: PathBuf) -> Self {
         Self { repo_path }
     }
 
-    /// Initialize a git repository if it doesn't exist
     pub fn init(&self) -> Result<()> {
         if !self.repo_path.join(".git").exists() {
             Repository::init(&self.repo_path)
@@ -27,18 +22,15 @@ impl GitOperations {
         Ok(())
     }
 
-    /// Get or open the repository
     fn get_repo(&self) -> Result<Repository> {
         Repository::open(&self.repo_path)
             .map_err(|e| Error::InvalidData(format!("Failed to open git repo: {}", e)))
     }
 
-    /// Check if the repository is initialized
     pub fn is_initialized(&self) -> bool {
         self.repo_path.join(".git").exists()
     }
 
-    /// Add all changes to the index
     pub fn add_all(&self) -> Result<()> {
         let repo = self.get_repo()?;
         let mut index = repo
@@ -56,7 +48,6 @@ impl GitOperations {
         Ok(())
     }
 
-    /// Create a commit with the given message
     pub fn commit(&self, message: &str) -> Result<Oid> {
         let repo = self.get_repo()?;
         let signature = Signature::now("MooTimer", "mootimer@local")
@@ -74,7 +65,6 @@ impl GitOperations {
             .find_tree(tree_id)
             .map_err(|e| Error::InvalidData(format!("Failed to find tree: {}", e)))?;
 
-        // Get parent commit if exists
         let parent_commit = match repo.head() {
             Ok(head) => {
                 let commit = head.peel_to_commit().map_err(|e| {
@@ -96,7 +86,6 @@ impl GitOperations {
             )
             .map_err(|e| Error::InvalidData(format!("Failed to create commit: {}", e)))?
         } else {
-            // Initial commit (no parent)
             repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[])
                 .map_err(|e| {
                     Error::InvalidData(format!("Failed to create initial commit: {}", e))
@@ -106,7 +95,6 @@ impl GitOperations {
         Ok(commit_id)
     }
 
-    /// Check if there are uncommitted changes
     pub fn has_changes(&self) -> Result<bool> {
         let repo = self.get_repo()?;
         let mut opts = StatusOptions::new();
@@ -120,11 +108,9 @@ impl GitOperations {
         Ok(!statuses.is_empty())
     }
 
-    /// Add a remote repository
     pub fn add_remote(&self, name: &str, url: &str) -> Result<()> {
         let repo = self.get_repo()?;
 
-        // Remove existing remote if it exists
         let _ = repo.remote_delete(name);
 
         repo.remote(name, url)
@@ -133,7 +119,6 @@ impl GitOperations {
         Ok(())
     }
 
-    /// Pull changes from remote (with rebase strategy)
     pub fn pull(&self, remote_name: &str, branch: &str) -> Result<()> {
         let repo = self.get_repo()?;
 
@@ -141,7 +126,6 @@ impl GitOperations {
             .find_remote(remote_name)
             .map_err(|e| Error::InvalidData(format!("Failed to find remote: {}", e)))?;
 
-        // Fetch from remote
         let mut callbacks = RemoteCallbacks::new();
         callbacks.credentials(|_url, username_from_url, _allowed_types| {
             Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
@@ -154,7 +138,6 @@ impl GitOperations {
             .fetch(&[branch], Some(&mut fetch_opts), None)
             .map_err(|e| Error::InvalidData(format!("Failed to fetch: {}", e)))?;
 
-        // Get the fetch head
         let fetch_head = repo
             .find_reference("FETCH_HEAD")
             .map_err(|e| Error::InvalidData(format!("Failed to find FETCH_HEAD: {}", e)))?;
@@ -163,16 +146,13 @@ impl GitOperations {
             .reference_to_annotated_commit(&fetch_head)
             .map_err(|e| Error::InvalidData(format!("Failed to get fetch commit: {}", e)))?;
 
-        // Perform merge (fast-forward if possible)
         let analysis = repo
             .merge_analysis(&[&fetch_commit])
             .map_err(|e| Error::InvalidData(format!("Failed to analyze merge: {}", e)))?;
 
         if analysis.0.is_up_to_date() {
-            // Already up to date
             return Ok(());
         } else if analysis.0.is_fast_forward() {
-            // Fast-forward merge
             let refname = format!("refs/heads/{}", branch);
             let mut reference = repo
                 .find_reference(&refname)
@@ -188,8 +168,6 @@ impl GitOperations {
             repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
                 .map_err(|e| Error::InvalidData(format!("Failed to checkout: {}", e)))?;
         } else {
-            // Need to merge - for simplicity, we'll prefer ours (local) strategy
-            // This is suitable for time tracking data where conflicts are unlikely
             return Err(Error::InvalidData(
                 "Merge conflicts detected. Please resolve manually.".to_string(),
             ));
@@ -198,7 +176,6 @@ impl GitOperations {
         Ok(())
     }
 
-    /// Push changes to remote
     pub fn push(&self, remote_name: &str, branch: &str) -> Result<()> {
         let repo = self.get_repo()?;
 
@@ -223,7 +200,6 @@ impl GitOperations {
         Ok(())
     }
 
-    /// Get the current branch name
     pub fn current_branch(&self) -> Result<String> {
         let repo = self.get_repo()?;
 
@@ -238,7 +214,6 @@ impl GitOperations {
         Ok(branch.to_string())
     }
 
-    /// Get the last commit message
     pub fn last_commit_message(&self) -> Result<String> {
         let repo = self.get_repo()?;
 
@@ -257,7 +232,6 @@ impl GitOperations {
         Ok(message.to_string())
     }
 
-    /// Get the number of commits ahead/behind remote
     pub fn get_sync_status(&self, remote_name: &str, branch: &str) -> Result<(usize, usize)> {
         let repo = self.get_repo()?;
 
@@ -270,7 +244,7 @@ impl GitOperations {
 
         let remote_oid = match repo.refname_to_id(&remote_ref) {
             Ok(oid) => oid,
-            Err(_) => return Ok((0, 0)), // Remote doesn't exist yet
+            Err(_) => return Ok((0, 0)),
         };
 
         let (ahead, behind) = repo
@@ -303,7 +277,6 @@ mod tests {
 
         git_ops.init().unwrap();
 
-        // Create a test file
         std::fs::write(temp_dir.path().join("test.txt"), "Hello").unwrap();
 
         git_ops.add_all().unwrap();
@@ -320,20 +293,15 @@ mod tests {
 
         git_ops.init().unwrap();
 
-        // No changes initially
         assert!(!git_ops.has_changes().unwrap());
 
-        // Create a file
         std::fs::write(temp_dir.path().join("test.txt"), "Hello").unwrap();
 
-        // Should have changes now
         assert!(git_ops.has_changes().unwrap());
 
-        // Commit the changes
         git_ops.add_all().unwrap();
         git_ops.commit("Add test file").unwrap();
 
-        // No changes after commit
         assert!(!git_ops.has_changes().unwrap());
     }
 
@@ -344,7 +312,6 @@ mod tests {
 
         git_ops.init().unwrap();
 
-        // Create initial commit so branch exists
         std::fs::write(temp_dir.path().join("test.txt"), "Hello").unwrap();
         git_ops.add_all().unwrap();
         git_ops.commit("Initial commit").unwrap();

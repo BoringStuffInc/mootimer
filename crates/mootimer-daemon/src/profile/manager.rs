@@ -1,4 +1,3 @@
-//! Profile manager for CRUD operations
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +11,6 @@ use mootimer_core::{
     storage::{ProfileStorage, init_data_dir},
 };
 
-/// Profile manager error
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileManagerError {
     #[error("Profile not found: {0}")]
@@ -30,11 +28,9 @@ pub enum ProfileManagerError {
 
 pub type Result<T> = std::result::Result<T, ProfileManagerError>;
 
-/// Manages profiles with caching and persistence
 pub struct ProfileManager {
     storage: ProfileStorage,
     cache: Arc<RwLock<HashMap<String, Profile>>>,
-    /// Event manager for broadcasting events
     event_manager: Arc<EventManager>,
 }
 
@@ -63,12 +59,10 @@ impl ProfileManager {
     }
 
     pub async fn create(&self, profile: Profile) -> Result<Profile> {
-        // Validate profile
         profile
             .validate()
             .map_err(|e| ProfileManagerError::Invalid(e.to_string()))?;
 
-        // Check if already exists
         {
             let cache = self.cache.read().await;
             if cache.contains_key(&profile.id) {
@@ -76,16 +70,13 @@ impl ProfileManager {
             }
         }
 
-        // Save to storage
         self.storage.save(&profile)?;
 
-        // Add to cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(profile.id.clone(), profile.clone());
         }
 
-        // Emit profile created event
         let event = ProfileEvent::created(profile.clone());
         self.event_manager.emit_profile(event);
 
@@ -93,7 +84,6 @@ impl ProfileManager {
     }
 
     pub async fn get(&self, profile_id: &str) -> Result<Profile> {
-        // Try cache first
         {
             let cache = self.cache.read().await;
             if let Some(profile) = cache.get(profile_id) {
@@ -101,13 +91,11 @@ impl ProfileManager {
             }
         }
 
-        // Load from storage
         let profile = self
             .storage
             .load(profile_id)
             .map_err(|_| ProfileManagerError::NotFound(profile_id.to_string()))?;
 
-        // Update cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(profile_id.to_string(), profile.clone());
@@ -122,12 +110,10 @@ impl ProfileManager {
     }
 
     pub async fn update(&self, mut profile: Profile) -> Result<Profile> {
-        // Validate profile
         profile
             .validate()
             .map_err(|e| ProfileManagerError::Invalid(e.to_string()))?;
 
-        // Check if exists
         {
             let cache = self.cache.read().await;
             if !cache.contains_key(&profile.id) {
@@ -135,19 +121,15 @@ impl ProfileManager {
             }
         }
 
-        // Update timestamp
         profile.touch();
 
-        // Save to storage
         self.storage.save(&profile)?;
 
-        // Update cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(profile.id.clone(), profile.clone());
         }
 
-        // Emit profile updated event
         let event = ProfileEvent::updated(profile.clone());
         self.event_manager.emit_profile(event);
 
@@ -155,7 +137,6 @@ impl ProfileManager {
     }
 
     pub async fn delete(&self, profile_id: &str) -> Result<()> {
-        // Check if exists
         {
             let cache = self.cache.read().await;
             if !cache.contains_key(profile_id) {
@@ -163,16 +144,13 @@ impl ProfileManager {
             }
         }
 
-        // Delete from storage
         self.storage.delete(profile_id)?;
 
-        // Remove from cache
         {
             let mut cache = self.cache.write().await;
             cache.remove(profile_id);
         }
 
-        // Emit profile deleted event
         let event = ProfileEvent::deleted(profile_id.to_string());
         self.event_manager.emit_profile(event);
 

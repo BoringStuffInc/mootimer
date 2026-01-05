@@ -1,4 +1,3 @@
-//! Profile API methods
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -26,7 +25,6 @@ struct UpdateProfileParams {
     profile: Profile,
 }
 
-/// Create a new profile
 pub async fn create(manager: &Arc<ProfileManager>, params: Option<Value>) -> Result<Value> {
     let params: CreateProfileParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -53,7 +51,6 @@ pub async fn create(manager: &Arc<ProfileManager>, params: Option<Value>) -> Res
     Ok(serde_json::to_value(&created)?)
 }
 
-/// Get a profile
 pub async fn get(manager: &Arc<ProfileManager>, params: Option<Value>) -> Result<Value> {
     let params: ProfileIdParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -67,7 +64,6 @@ pub async fn get(manager: &Arc<ProfileManager>, params: Option<Value>) -> Result
     Ok(serde_json::to_value(&profile)?)
 }
 
-/// List all profiles
 pub async fn list(manager: &Arc<ProfileManager>, _params: Option<Value>) -> Result<Value> {
     let profiles = manager
         .list()
@@ -77,7 +73,6 @@ pub async fn list(manager: &Arc<ProfileManager>, _params: Option<Value>) -> Resu
     Ok(serde_json::to_value(&profiles)?)
 }
 
-/// Update a profile
 pub async fn update(manager: &Arc<ProfileManager>, params: Option<Value>) -> Result<Value> {
     let params: UpdateProfileParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -91,7 +86,6 @@ pub async fn update(manager: &Arc<ProfileManager>, params: Option<Value>) -> Res
     Ok(serde_json::to_value(&updated)?)
 }
 
-/// Delete a profile
 pub async fn delete(manager: &Arc<ProfileManager>, params: Option<Value>) -> Result<Value> {
     let params: ProfileIdParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,

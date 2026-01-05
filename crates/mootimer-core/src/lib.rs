@@ -1,7 +1,3 @@
-//! MooTimer Core Library
-//!
-//! This crate contains the core data models, storage logic, and utilities
-//! for the MooTimer application.
 
 pub mod error;
 pub mod git;

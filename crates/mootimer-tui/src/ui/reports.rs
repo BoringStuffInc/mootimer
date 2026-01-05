@@ -7,7 +7,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-/// Helper function to get profile name from ID
 fn get_profile_name<'a>(app: &'a App, profile_id: &'a str) -> &'a str {
     app.profiles
         .iter()
@@ -18,19 +17,15 @@ fn get_profile_name<'a>(app: &'a App, profile_id: &'a str) -> &'a str {
 }
 
 pub fn draw_reports(f: &mut Frame, app: &App, area: Rect) {
-    // Split into summary and breakdown sections
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // Summary stats
-            Constraint::Min(5),     // Task breakdown
+            Constraint::Length(12),
+            Constraint::Min(5),
         ])
         .split(area);
 
-    // Draw summary
     draw_report_summary(f, app, chunks[0]);
-
-    // Draw task breakdown
     draw_task_breakdown(f, app, chunks[1]);
 }
 
@@ -102,20 +97,28 @@ fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
         get_profile_name(app, &app.report_profile)
     };
 
-    let report =
-        Paragraph::new(report_text).block(Block::default().borders(Borders::ALL).title(format!(
-            "📈 {} Report - {}",
-            app.report_period.to_uppercase(),
-            profile_label
-        )));
+    let period_hint = "[d]ay [w]eek [m]onth";
+    let profile_hint = "[p]rofile toggle";
+
+    let report = Paragraph::new(report_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(
+                " 📈 {} Report - {} ",
+                app.report_period.to_uppercase(),
+                profile_label
+            ))
+            .title_bottom(
+                Line::from(format!(" {} | {} | [r]efresh ", period_hint, profile_hint)).right_aligned()
+            ),
+    );
     f.render_widget(report, area);
 }
 
 fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
     use std::collections::HashMap;
 
-    // Build task breakdown from report_entries
-    let mut task_map: HashMap<String, (u64, usize)> = HashMap::new(); // task_id -> (total_seconds, count)
+    let mut task_map: HashMap<String, (u64, usize)> = HashMap::new();
 
     for entry in &app.report_entries {
         let duration = entry
@@ -134,19 +137,16 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
         entry_data.1 += 1;
     }
 
-    // Convert to sorted vec
     let mut task_breakdown: Vec<(String, u64, usize)> = task_map
         .into_iter()
         .map(|(task_id, (secs, count))| (task_id, secs, count))
         .collect();
 
-    // Sort by duration (descending), then by task_id (ascending) for stable sort
     task_breakdown.sort_by(|a, b| {
-        b.1.cmp(&a.1) // Sort by duration descending
-            .then_with(|| a.0.cmp(&b.0)) // Then by task_id ascending
+        b.1.cmp(&a.1)
+            .then_with(|| a.0.cmp(&b.0))
     });
 
-    // Build lines
     let mut lines = vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -161,7 +161,6 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
     if task_breakdown.is_empty() {
         lines.push(Line::from("  No sessions recorded for this period"));
     } else {
-        // Find task names from app.tasks
         for (task_id, total_secs, count) in task_breakdown.iter().take(10) {
             let task_display = if task_id == "No task" {
                 "No task".to_string()
@@ -174,7 +173,6 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown");
 
-                // Show task name with UUID for enterprise vibes
                 format!("{} [{}]", task_name, &task_id[..8])
             };
 
@@ -186,7 +184,6 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
                 format!("{}m", minutes)
             };
 
-            // Truncate task display if too long
             let display_name = if task_display.len() > 40 {
                 format!("{}...", &task_display[..37])
             } else {
@@ -211,7 +208,7 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
     let breakdown = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("📋 Task Breakdown"),
+            .title(" 📋 Task Breakdown "),
     );
     f.render_widget(breakdown, area);
 }

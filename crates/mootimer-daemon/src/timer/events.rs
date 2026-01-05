@@ -1,10 +1,8 @@
-//! Timer events
 
 use chrono::{DateTime, Utc};
 use mootimer_core::models::{PomodoroPhase, TimerMode};
 use serde::{Deserialize, Serialize};
 
-/// Event emitted by the timer system
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimerEvent {
     pub event_type: TimerEventType,
@@ -13,44 +11,33 @@ pub struct TimerEvent {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Types of timer events
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TimerEventType {
-    /// Timer started
     Started {
         task_id: Option<String>,
         mode: TimerMode,
     },
-    /// Timer stopped
     Stopped { duration_seconds: u64 },
-    /// Timer paused
     Paused { elapsed_seconds: u64 },
-    /// Timer resumed
     Resumed,
-    /// Timer cancelled (stopped without saving)
     Cancelled,
-    /// Timer tick (periodic update)
     Tick {
         elapsed_seconds: u64,
         remaining_seconds: Option<u64>,
     },
-    /// Pomodoro phase changed
     PhaseChanged {
         new_phase: PomodoroPhase,
         session_number: u32,
     },
-    /// Pomodoro phase completed
     PhaseCompleted {
         phase: PomodoroPhase,
         session_number: u32,
     },
-    /// Countdown timer completed
     CountdownCompleted,
 }
 
 impl TimerEvent {
-    /// Create a new timer event
     pub fn new(event_type: TimerEventType, profile_id: String, timer_id: String) -> Self {
         Self {
             event_type,
@@ -60,7 +47,6 @@ impl TimerEvent {
         }
     }
 
-    /// Create a started event
     pub fn started(
         profile_id: String,
         timer_id: String,
@@ -74,7 +60,6 @@ impl TimerEvent {
         )
     }
 
-    /// Create a stopped event
     pub fn stopped(profile_id: String, timer_id: String, duration_seconds: u64) -> Self {
         Self::new(
             TimerEventType::Stopped { duration_seconds },
@@ -83,7 +68,6 @@ impl TimerEvent {
         )
     }
 
-    /// Create a tick event
     pub fn tick(
         profile_id: String,
         timer_id: String,
@@ -100,7 +84,6 @@ impl TimerEvent {
         )
     }
 
-    /// Create a phase changed event
     pub fn phase_changed(
         profile_id: String,
         timer_id: String,

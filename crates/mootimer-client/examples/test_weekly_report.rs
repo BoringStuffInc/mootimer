@@ -1,4 +1,3 @@
-// Test weekly report data loading
 use mootimer_client::MooTimerClient;
 
 #[tokio::main]
@@ -26,7 +25,6 @@ async fn main() -> anyhow::Result<()> {
     if let Some(entry_arr) = entries.as_array() {
         println!("✓ Found {} entries for this week", entry_arr.len());
 
-        // Show first 3 entries
         for (i, entry) in entry_arr.iter().take(3).enumerate() {
             let duration = entry
                 .get("duration_seconds")

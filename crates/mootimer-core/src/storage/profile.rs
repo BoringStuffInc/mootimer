@@ -1,4 +1,3 @@
-//! Profile storage operations
 
 use crate::{Result, models::Profile};
 use std::path::PathBuf;

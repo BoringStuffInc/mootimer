@@ -1,7 +1,6 @@
 use ratatui::prelude::*;
 use std::f64::consts::PI;
 
-// --- EASING (Smooth S-Curve) ---
 fn ease_in_out_cubic(x: f64) -> f64 {
     if x < 0.5 {
         4.0 * x * x * x
@@ -10,7 +9,6 @@ fn ease_in_out_cubic(x: f64) -> f64 {
     }
 }
 
-// --- STATE ---
 pub struct TomatoState {
     pub rotation: f64,
     pub wobble: f64,
@@ -43,7 +41,6 @@ impl TomatoState {
     }
 
     pub fn tick(&mut self) {
-        // Blink
         if self.is_blinking {
             if self.blink_timer > 0 {
                 self.blink_timer -= 1;
@@ -58,7 +55,6 @@ impl TomatoState {
             self.blink_timer = 5;
         }
 
-        // Spin
         if self.is_spinning {
             self.progress += 0.015;
             if self.progress >= 1.0 {
@@ -70,7 +66,6 @@ impl TomatoState {
             } else {
                 let eased = ease_in_out_cubic(self.progress);
                 self.rotation = eased * 2.0 * PI;
-                // Wobble head sideways
                 self.wobble = (self.progress * PI).sin() * 0.5;
             }
         } else if self.pause_timer > 0 {
@@ -113,7 +108,6 @@ struct Buffers<'a> {
     color_buffer: &'a mut [Color],
 }
 
-// --- WIDGET ---
 pub struct Tomato;
 
 impl StatefulWidget for Tomato {
@@ -123,7 +117,6 @@ impl StatefulWidget for Tomato {
         let width = area.width as usize;
         let height = area.height as usize;
 
-        // If area is too small, don't render to avoid crashes or weird artifacts
         if width < 5 || height < 5 {
             return;
         }
@@ -132,20 +125,16 @@ impl StatefulWidget for Tomato {
         let cy = height as f64 / 2.0;
 
         let spin_ang = state.rotation;
-        // Rest wobble: -0.15 makes it look cute/shy when stopped
         let wobble_ang = state.wobble - 0.15;
 
-        // FIXED: Negative tilt tips the Top (+Y) TOWARDS the viewer (-Z)
-        // This ensures the leaves are visible on top
         let camera_tilt: f64 = -0.55;
 
         let mut z_buffer = vec![f64::NEG_INFINITY; width * height];
         let mut char_buffer = vec![' '; width * height];
         let mut color_buffer = vec![Color::Reset; width * height];
 
-        // Light: From Top-Left-Front
         let lx: f64 = -0.5;
-        let ly: f64 = 0.8; // High light to catch the leaves
+        let ly: f64 = 0.8;
         let lz: f64 = -1.0;
         let l_len = (lx * lx + ly * ly + lz * lz).sqrt();
         let (nlx, nly, nlz) = (lx / l_len, ly / l_len, lz / l_len);
@@ -163,7 +152,6 @@ impl StatefulWidget for Tomato {
         let radius_x = 13.0;
         let radius_y = 10.5;
 
-        // --- SPHERE ---
         let mut theta = 0.0_f64;
         while theta < 2.0 * PI {
             let mut phi = 0.0_f64;
@@ -173,7 +161,6 @@ impl StatefulWidget for Tomato {
                 let costheta = theta.cos();
                 let sintheta = theta.sin();
 
-                // Geometry (Y is Up)
                 let x = radius_x * sinphi * costheta;
                 let y = radius_y * cosphi;
                 let z = radius_x * sinphi * sintheta;
@@ -182,23 +169,16 @@ impl StatefulWidget for Tomato {
                 let mut display_color = Color::Red;
                 let mut is_bright = false;
 
-                // 1. LEAVES
-                // phi starts at 0 (Top). We want the top ~0.6 radians to be green
-                // We add theta noise to make the star shape
                 let leaf_threshold = 0.6 + 0.15 * (5.0 * theta).cos();
                 if phi < leaf_threshold {
                     display_char = '%';
                     display_color = Color::Green;
-                    // Make leaves slightly brighter/rougher
                     is_bright = true;
                 } else {
-                    // 2. FACE
-                    // Front is -Z, which corresponds to theta = 3*PI/2
                     let face_theta = 3.0 * PI / 2.0;
 
                     let theta_diff = (theta - face_theta).abs();
 
-                    // Eyes: slightly above equator (phi 1.3)
                     let eye_phi = 1.3;
                     let eye_spacing = 0.35;
 
@@ -207,7 +187,6 @@ impl StatefulWidget for Tomato {
                     let right_eye = (theta - (face_theta + eye_spacing)).abs() < 0.15
                         && (phi - eye_phi).abs() < 0.15;
 
-                    // Blush: below eyes
                     let blush = theta_diff < 0.7 && (phi - 1.8).abs() < 0.1;
 
                     if left_eye || right_eye {
@@ -223,18 +202,14 @@ impl StatefulWidget for Tomato {
                         display_char = '=';
                         display_color = Color::LightRed;
                     } else {
-                        // Skin
                         display_char = '?';
                     }
                 }
 
-                // Normals
                 let nx = sinphi * costheta;
                 let ny = cosphi;
                 let nz = sinphi * sintheta;
 
-                // Rotations
-                // 1. Spin (Y)
                 let (sa, ca) = (spin_ang.sin(), spin_ang.cos());
                 let x_a = x * ca - z * sa;
                 let y_a = y;
@@ -243,7 +218,6 @@ impl StatefulWidget for Tomato {
                 let ny_a = ny;
                 let nz_a = nx * sa + nz * ca;
 
-                // 2. Wobble (Z)
                 let (sb, cb) = (wobble_ang.sin(), wobble_ang.cos());
                 let x_b = x_a * cb - y_a * sb;
                 let y_b = x_a * sb + y_a * cb;
@@ -252,7 +226,6 @@ impl StatefulWidget for Tomato {
                 let ny_b = nx_a * sb + ny_a * cb;
                 let nz_b = nz_a;
 
-                // 3. Camera (X)
                 let (sc, cc) = (camera_tilt.sin(), camera_tilt.cos());
                 let x_final = x_b;
                 let y_final = y_b * cc - z_b * sc;
@@ -290,7 +263,6 @@ impl StatefulWidget for Tomato {
             theta += 0.04;
         }
 
-        // --- STEM ---
         let stem_height = 2.5;
         let stem_radius = 0.6;
         let mut h = 0.0;
@@ -301,19 +273,16 @@ impl StatefulWidget for Tomato {
                 let z = stem_radius * ang.sin();
                 let y = radius_y + h;
 
-                // 1. Spin
                 let (sa, ca) = (spin_ang.sin(), spin_ang.cos());
                 let x_a = x * ca - z * sa;
                 let y_a = y;
                 let z_a = x * sa + z * ca;
 
-                // 2. Wobble
                 let (sb, cb) = (wobble_ang.sin(), wobble_ang.cos());
                 let x_b = x_a * cb - y_a * sb;
                 let y_b = x_a * sb + y_a * cb;
                 let z_b = z_a;
 
-                // 3. Camera
                 let (sc, cc) = (camera_tilt.sin(), camera_tilt.cos());
                 let x_final = x_b;
                 let y_final = y_b * cc - z_b * sc;
@@ -347,7 +316,6 @@ impl StatefulWidget for Tomato {
             h += 0.2;
         }
 
-        // Render
         for y in 0..height {
             for x in 0..width {
                 let idx = y * width + x;
@@ -379,7 +347,6 @@ fn plot_point_final(
         let k2 = 45.0;
         let ooz = 1.0 / (p.z + k2);
 
-        // NOTE: Minus Y because screen coordinates go down
         let xp = (ctx.cx + 45.0 * ooz * p.x) as usize;
         let yp = (ctx.cy - 45.0 * ooz * p.y * 0.55) as usize;
 

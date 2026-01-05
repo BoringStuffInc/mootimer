@@ -1,4 +1,3 @@
-//! Entry management module
 
 pub mod manager;
 

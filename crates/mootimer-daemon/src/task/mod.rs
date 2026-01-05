@@ -1,4 +1,3 @@
-//! Task management module
 
 pub mod manager;
 

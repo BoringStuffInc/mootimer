@@ -11,7 +11,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Checking Reports Data ===\n");
 
-    // Get tasks
     println!("Tasks:");
     let tasks = client.task_list("test").await?;
     if let Some(tasks_arr) = tasks.as_array() {

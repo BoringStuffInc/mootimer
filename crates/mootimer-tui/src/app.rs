@@ -1,5 +1,3 @@
-//! Application state management
-
 use crate::ui::cow::CowState;
 use crate::ui::tomato::TomatoState;
 use anyhow::Result;
@@ -42,6 +40,8 @@ pub enum InputMode {
     RenameProfile,
     DeleteProfileConfirm,
     EditEntryDuration,
+    ConfirmQuit,
+    PomodoroBreakFinished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,14 +77,15 @@ pub struct App {
     pub show_help: bool,
     pub input_mode: InputMode,
     pub input_buffer: String,
+    pub input_buffer_2: String,
+    pub focused_input_field: usize,
+    pub temp_task_title: Option<String>,
 
-    // UI state
     pub entry_filter: String,
     pub task_search: String,
     pub show_archived: bool,
     pub selected_setting_index: usize,
 
-    // Data
     pub timer_info: Option<Value>,
     pub stats_today: Option<Value>,
     pub stats_week: Option<Value>,
@@ -97,19 +98,16 @@ pub struct App {
     pub log_lines: Vec<String>,
     pub profiles: Vec<Value>,
 
-    // Cross-profile report cache
-    cross_profile_cache: HashMap<String, (Vec<Value>, Instant)>, // period -> (entries, timestamp)
+    cross_profile_cache: HashMap<String, (Vec<Value>, Instant)>,
 
-    // UI state
     pub selected_task_index: usize,
     pub selected_entry_index: usize,
-    pub selected_button_index: usize,
     pub selected_log_index: usize,
     pub selected_profile_index: usize,
-    pub selected_column_index: usize, // 0=Todo, 1=InProgress, 2=Done
+    pub selected_column_index: usize,
     pub selected_kanban_card_index: usize,
     pub report_period: String,
-    pub report_profile: String, // profile_id or "all"
+    pub report_profile: String,
     pub selected_timer_type: TimerType,
     pub pomodoro_minutes: u64,
     pub countdown_minutes: u64,
@@ -117,7 +115,7 @@ pub struct App {
     pub status_message: String,
     pub five_min_warning_shown: bool,
     pub audio_alerts_enabled: bool,
-    pub cow_modal_enabled: bool, // shows on countdown completion
+    pub cow_modal_enabled: bool,
     pub show_cow_modal: bool,
     pub show_task_description: bool,
     pub tomato_state: TomatoState,
@@ -142,6 +140,9 @@ impl App {
             show_help: false,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
+            input_buffer_2: String::new(),
+            focused_input_field: 0,
+            temp_task_title: None,
             entry_filter: String::new(),
             task_search: String::new(),
             show_archived: false,
@@ -162,7 +163,6 @@ impl App {
 
             selected_task_index: 0,
             selected_entry_index: 0,
-            selected_button_index: 0,
             selected_log_index: 0,
             selected_profile_index: 0,
             selected_column_index: 0,
@@ -181,6 +181,22 @@ impl App {
             show_task_description: false,
             tomato_state: TomatoState::new(),
             cow_state: CowState::new(),
+        }
+    }
+
+    pub fn handle_input_char(&mut self, c: char) {
+        if self.focused_input_field == 0 {
+            self.input_buffer.push(c);
+        } else {
+            self.input_buffer_2.push(c);
+        }
+    }
+
+    pub fn handle_input_backspace(&mut self) {
+        if self.focused_input_field == 0 {
+            self.input_buffer.pop();
+        } else {
+            self.input_buffer_2.pop();
         }
     }
 
@@ -204,8 +220,6 @@ impl App {
                     .unwrap_or("todo");
                 let is_archived = status == "archived";
 
-                // If showing archived, ONLY show archived.
-                // If NOT showing archived, show everything EXCEPT archived.
                 if self.show_archived {
                     if !is_archived {
                         return false;
@@ -233,14 +247,12 @@ impl App {
             self.entries
                 .iter()
                 .filter(|entry| {
-                    // Check description
                     if let Some(desc) = entry.get("description").and_then(|v| v.as_str())
                         && desc.to_lowercase().contains(&filter)
                     {
                         return true;
                     }
 
-                    // Check task name (requires lookup)
                     if let Some(tid) = entry.get("task_id").and_then(|v| v.as_str())
                         && let Some(task) = self
                             .tasks
@@ -252,7 +264,6 @@ impl App {
                         return true;
                     }
 
-                    // Check ID
                     if let Some(id) = entry.get("id").and_then(|v| v.as_str())
                         && id.to_lowercase().contains(&filter)
                     {
@@ -272,11 +283,19 @@ impl App {
             .iter()
             .filter(|t| {
                 let status = t.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
-                let matches_status = match column_index {
-                    0 => status == "todo",
-                    1 => status == "in_progress",
-                    2 => status == "done" || status == "completed",
-                    _ => false,
+                
+                let matches_status = if self.show_archived {
+                    column_index == 0 && status == "archived"
+                } else {
+                    if status == "archived" {
+                        return false;
+                    }
+                    match column_index {
+                        0 => status == "todo",
+                        1 => status == "in_progress",
+                        2 => status == "done" || status == "completed",
+                        _ => false,
+                    }
                 };
 
                 if !matches_status {
@@ -299,7 +318,6 @@ impl App {
     }
 
     pub async fn move_kanban_card(&mut self, direction: i32) -> Result<()> {
-        // direction: -1 (left), 1 (right)
         let current_col = self.selected_column_index;
         let new_col = if direction > 0 {
             (current_col + 1).min(2)
@@ -318,7 +336,7 @@ impl App {
             let new_status = match new_col {
                 0 => "todo",
                 1 => "in_progress",
-                2 => "done", // Use "done" as per model
+                2 => "done",
                 _ => "todo",
             };
 
@@ -328,15 +346,12 @@ impl App {
                     serde_json::Value::String(new_status.to_string()),
                 );
 
-                // Call update
                 self.client
                     .task_update(&self.profile_id, task_clone)
                     .await?;
                 self.refresh_tasks().await?;
 
-                // Update selection to new column
                 self.selected_column_index = new_col;
-                // Select the last item in the new column (likely the one we just moved, roughly)
                 let new_len = self.get_kanban_tasks(new_col).len();
                 self.selected_kanban_card_index = new_len.saturating_sub(1);
             }
@@ -344,65 +359,13 @@ impl App {
         Ok(())
     }
 
-    pub fn get_button_count(&self) -> usize {
-        match self.current_view {
-            AppView::Dashboard => {
-                // Button count varies based on timer state
-                let timer_state = self
-                    .timer_info
-                    .as_ref()
-                    .and_then(|t| t.get("state"))
-                    .and_then(|s| s.as_str());
-
-                match self.focused_pane {
-                    DashboardPane::TimerConfig => {
-                        match timer_state {
-                            Some("running") | Some("paused") => 2, // Pause/Resume, Stop
-                            _ => 2,                                // Start Timer, Type
-                        }
-                    }
-                    DashboardPane::TasksList => 4, // New, Edit, Delete, Start Timer
-                    DashboardPane::ProfileList => 4, // Switch, New, Delete, Rename
-                }
-            }
-            AppView::Kanban => 4, // New Task, Edit, Delete, Start Timer (similar to Tasks)
-            AppView::Entries => 4, // Day, Week, Month, Refresh
-            AppView::Reports => 5, // Day, Week, Month, Toggle Profile, Refresh
-            AppView::Settings => 0, // No buttons in new settings design
-            AppView::Logs => 2,   // Refresh, Clear
-        }
-    }
-
-    pub fn button_next(&mut self) {
-        let max = self.get_button_count();
-        if max == 0 {
-            return;
-        }
-        self.selected_button_index = (self.selected_button_index + 1) % max;
-    }
-
-    pub fn button_previous(&mut self) {
-        let max = self.get_button_count();
-        if max == 0 {
-            return;
-        }
-        self.selected_button_index = if self.selected_button_index == 0 {
-            max - 1
-        } else {
-            self.selected_button_index - 1
-        };
-    }
-
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
     }
 
-    // View navigation
-    // List navigation
     pub fn list_next(&mut self) {
         match self.current_view {
             AppView::Dashboard => {
-                // Navigate tasks in dashboard
                 let len = self.get_filtered_tasks().len();
                 if len > 0 && self.selected_task_index < len.saturating_sub(1) {
                     self.selected_task_index += 1;
@@ -421,7 +384,6 @@ impl App {
     pub fn list_previous(&mut self) {
         match self.current_view {
             AppView::Dashboard => {
-                // Navigate tasks in dashboard
                 if !self.get_filtered_tasks().is_empty() {
                     self.selected_task_index = self.selected_task_index.saturating_sub(1);
                 }
@@ -461,7 +423,6 @@ impl App {
         }
     }
 
-    // Data refresh methods
     pub async fn refresh_all(&mut self) -> Result<()> {
         self.refresh_timer().await?;
         self.refresh_stats().await?;
@@ -480,7 +441,6 @@ impl App {
 
     pub async fn refresh_stats(&mut self) -> Result<()> {
         self.stats_today = self.client.entry_stats_today(&self.profile_id).await.ok();
-        // Note: week and month stats would need additional API methods
         Ok(())
     }
 
@@ -507,18 +467,15 @@ impl App {
     pub async fn refresh_config(&mut self) -> Result<()> {
         self.config = self.client.call("config.get", None).await.ok();
 
-        // Load defaults from config if available
         if let Some(config) = &self.config
             && let Some(pomodoro) = config.get("pomodoro")
         {
-            // Update countdown default
             if let Some(countdown_seconds) =
                 pomodoro.get("countdown_default").and_then(|v| v.as_u64())
             {
                 self.countdown_minutes = countdown_seconds / 60;
             }
 
-            // Update pomodoro work duration default
             if let Some(work_seconds) = pomodoro.get("work_duration").and_then(|v| v.as_u64()) {
                 self.pomodoro_minutes = work_seconds / 60;
             }
@@ -536,11 +493,9 @@ impl App {
     }
 
     pub async fn refresh_reports(&mut self) -> Result<()> {
-        // If "all" profiles selected, aggregate from all profiles
         if self.report_profile == "all" {
             self.refresh_all_profile_reports().await?;
         } else {
-            // Single profile reporting
             let params = Some(serde_json::json!({"profile_id": self.report_profile}));
 
             match self.report_period.as_str() {
@@ -603,7 +558,6 @@ impl App {
     }
 
     async fn refresh_all_profile_reports(&mut self) -> Result<()> {
-        // Check cache first (30 second TTL)
         let cache_key = format!("all_{}", self.report_period);
         if let Some((cached_entries, timestamp)) = self.cross_profile_cache.get(&cache_key)
             && timestamp.elapsed() < Duration::from_secs(30)
@@ -616,7 +570,6 @@ impl App {
 
         self.status_message = "Loading all profiles...".to_string();
 
-        // Get all profiles
         let profiles = if self.profiles.is_empty() {
             match self.client.profile_list().await {
                 Ok(val) => val.as_array().cloned().unwrap_or_default(),
@@ -626,12 +579,11 @@ impl App {
                 }
             }
         } else {
-            self.profiles.clone() // Clone once, not in loop
+            self.profiles.clone()
         };
 
         let profile_count = profiles.len();
 
-        // Warn if too many profiles (but don't limit!)
         if profile_count > 50 {
             self.status_message = format!(
                 "Warning: Loading {} profiles, this may take a moment...",
@@ -639,8 +591,7 @@ impl App {
             );
         }
 
-        // Build futures for ALL profiles (no limit!)
-        let client = Arc::new(&self.client); // Share client via Arc
+        let client = Arc::new(&self.client);
         let period = self.report_period.clone();
 
         let fetch_futures: Vec<_> = profiles
@@ -670,11 +621,9 @@ impl App {
             })
             .collect();
 
-        // Execute ALL requests in PARALLEL!
         self.status_message = format!("Fetching {} profiles in parallel...", profile_count);
         let results = futures::future::join_all(fetch_futures).await;
 
-        // Aggregate results
         let mut all_entries = Vec::new();
         let mut success_count = 0;
 
@@ -684,7 +633,6 @@ impl App {
             {
                 success_count += 1;
                 for entry in entries_array {
-                    // Add profile_id inline (minimal cloning)
                     if let Some(mut entry_obj) = entry.as_object().cloned() {
                         entry_obj.insert(
                             "profile_id".to_string(),
@@ -697,7 +645,6 @@ impl App {
             }
         }
 
-        // Cache the results
         self.cross_profile_cache
             .insert(cache_key, (all_entries.clone(), Instant::now()));
 
@@ -745,8 +692,8 @@ impl App {
             let content = fs::read_to_string(&log_file_path)?;
             self.log_lines = content
                 .lines()
-                .rev() // Reverse so newest is first
-                .take(1000) // Keep last 1000 lines
+                .rev()
+                .take(1000)
                 .map(|s| s.to_string())
                 .collect();
         } else {
@@ -757,13 +704,11 @@ impl App {
         Ok(())
     }
 
-    // Timer controls
     pub async fn start_timer(
         &mut self,
         pomodoro: bool,
         duration_minutes: Option<u64>,
     ) -> Result<()> {
-        // Check if a timer is already running
         if let Some(timer) = &self.timer_info
             && let Some(state) = timer.get("state").and_then(|v| v.as_str())
             && (state == "running" || state == "paused")
@@ -772,7 +717,6 @@ impl App {
             return Ok(());
         }
 
-        // Get currently selected task (if any)
         let filtered_tasks = self.get_filtered_tasks();
         let task_id = filtered_tasks
             .get(self.selected_task_index)
@@ -822,7 +766,6 @@ impl App {
     }
 
     pub async fn start_countdown_timer(&mut self) -> Result<()> {
-        // Check if a timer is already running
         if let Some(timer) = &self.timer_info
             && let Some(state) = timer.get("state").and_then(|v| v.as_str())
             && (state == "running" || state == "paused")
@@ -831,7 +774,6 @@ impl App {
             return Ok(());
         }
 
-        // Get currently selected task (if any)
         let filtered_tasks = self.get_filtered_tasks();
         let task_id = filtered_tasks
             .get(self.selected_task_index)
@@ -902,7 +844,6 @@ impl App {
             }
             TimerType::Countdown => {
                 if self.countdown_minutes < 180 {
-                    // Max 3 hours
                     self.countdown_minutes += 1;
                 }
                 self.status_message = format!("Countdown: {}m", self.countdown_minutes);
@@ -968,6 +909,19 @@ impl App {
         Ok(())
     }
 
+    pub async fn resume(&mut self) -> Result<()> {
+        match self.client.timer_resume(&self.profile_id).await {
+            Ok(_) => {
+                self.status_message = "Resumed".to_string();
+                self.refresh_timer().await?;
+            }
+            Err(e) => {
+                self.status_message = format!("Error: {}", e);
+            }
+        }
+        Ok(())
+    }
+
     pub async fn stop_timer(&mut self) -> Result<()> {
         match self.client.timer_stop(&self.profile_id).await {
             Ok(_) => {
@@ -983,7 +937,6 @@ impl App {
         Ok(())
     }
 
-    // Task management
     pub async fn archive_task(&mut self, task_id: &str) -> Result<()> {
         if let Some(task) = self
             .tasks
@@ -997,7 +950,7 @@ impl App {
                 .and_then(|v| v.as_str())
                 .unwrap_or("todo");
             let new_status = if current_status == "archived" {
-                "todo" // Restore to Todo
+                "todo"
             } else {
                 "archived"
             };
@@ -1029,13 +982,20 @@ impl App {
         match self.input_mode {
             InputMode::NewTask => {
                 if !self.input_buffer.is_empty() {
+                    let title = self.input_buffer.clone();
+                    let description = if self.input_buffer_2.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.input_buffer_2.clone())
+                    };
+
                     match self
                         .client
-                        .task_create(&self.profile_id, &self.input_buffer, None)
+                        .task_create(&self.profile_id, &title, description.as_deref())
                         .await
                     {
                         Ok(_) => {
-                            self.status_message = format!("Created task: {}", self.input_buffer);
+                            self.status_message = format!("Created task: {}", title);
                             self.refresh_tasks().await?;
                         }
                         Err(e) => {
@@ -1046,20 +1006,36 @@ impl App {
             }
             InputMode::EditTask => {
                 if !self.input_buffer.is_empty() {
-                    let filtered_tasks = self.get_filtered_tasks();
-                    // Need to clone the task to modify it
-                    if let Some(task_ref) = filtered_tasks.get(self.selected_task_index) {
-                        let mut task = (*task_ref).clone();
+                    let new_title = self.input_buffer.clone();
+                    let new_desc = self.input_buffer_2.clone();
+
+                    let task_opt = {
+                        let filtered_tasks = self.get_filtered_tasks();
+                        filtered_tasks.get(self.selected_task_index).map(|t| (*t).clone())
+                    };
+
+                    if let Some(mut task) = task_opt {
                         if let Some(obj) = task.as_object_mut() {
                             obj.insert(
                                 "title".to_string(),
-                                serde_json::Value::String(self.input_buffer.clone()),
+                                serde_json::Value::String(new_title.clone()),
                             );
+
+                            if new_desc.trim().is_empty() {
+                                obj.insert(
+                                    "description".to_string(),
+                                    serde_json::Value::String("".to_string()),
+                                );
+                            } else {
+                                obj.insert(
+                                    "description".to_string(),
+                                    serde_json::Value::String(new_desc),
+                                );
+                            }
 
                             match self.client.task_update(&self.profile_id, task).await {
                                 Ok(_) => {
-                                    self.status_message =
-                                        format!("Updated task: {}", self.input_buffer);
+                                    self.status_message = format!("Updated task: {}", new_title);
                                     self.refresh_tasks().await?;
                                 }
                                 Err(e) => {
@@ -1086,7 +1062,6 @@ impl App {
                 } else {
                     format!("Filtered by: {}", self.entry_filter)
                 };
-                // Reset selection
                 self.selected_entry_index = 0;
             }
             InputMode::ConfigPomodoro => {
@@ -1212,14 +1187,12 @@ impl App {
                     if let Some(entry_ref) = filtered_entries.get(self.selected_entry_index) {
                         let mut entry = (*entry_ref).clone();
                         if let Some(obj) = entry.as_object_mut() {
-                            // Update duration
                             let seconds = minutes * 60;
                             obj.insert(
                                 "duration_seconds".to_string(),
                                 serde_json::Value::Number(seconds.into()),
                             );
 
-                            // Update end_time
                             if let Some(start_str) = obj.get("start_time").and_then(|v| v.as_str())
                                 && let Ok(start_time) =
                                     chrono::DateTime::parse_from_rfc3339(start_str)
@@ -1297,21 +1270,11 @@ impl App {
         if let Some(task) = filtered_tasks.get(self.selected_task_index)
             && let Some(id) = task.get("id").and_then(|v| v.as_str())
         {
-            match self
-                .client
-                .call(
-                    "task.delete",
-                    Some(serde_json::json!({
-                        "profile_id": self.profile_id,
-                        "id": id
-                    })),
-                )
-                .await
+            match self.client.task_delete(&self.profile_id, id).await
             {
                 Ok(_) => {
                     self.status_message = "Task deleted".to_string();
                     self.refresh_tasks().await?;
-                    // Adjust index if needed
                     let new_len = self.get_filtered_tasks().len();
                     if self.selected_task_index >= new_len {
                         self.selected_task_index = new_len.saturating_sub(1);
@@ -1326,26 +1289,27 @@ impl App {
     }
 
     pub async fn edit_selected_task(&mut self) -> Result<()> {
-        let title_to_edit = {
+        let task_data = {
             let filtered_tasks = self.get_filtered_tasks();
             if let Some(task) = filtered_tasks.get(self.selected_task_index) {
-                task.get("title")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
+                let title = task.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let desc = task.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                Some((title, desc))
             } else {
                 None
             }
         };
 
-        if let Some(title) = title_to_edit {
+        if let Some((title, desc)) = task_data {
             self.input_mode = InputMode::EditTask;
             self.input_buffer = title;
-            self.status_message = "Edit task title:".to_string();
+            self.input_buffer_2 = desc;
+            self.focused_input_field = 0;
+            self.status_message = "Edit Task".to_string();
         }
         Ok(())
     }
 
-    // Entries
     pub async fn show_entries_for_day(&mut self) -> Result<()> {
         self.refresh_entries().await?;
         self.status_message = "Showing today's entries".to_string();
@@ -1413,7 +1377,7 @@ impl App {
             };
 
             let current_minutes = current_val / 60;
-            let new_minutes = (current_minutes as i32 + delta).max(1) as u64; // Ensure at least 1 minute
+            let new_minutes = (current_minutes as i32 + delta).max(1) as u64;
             let new_seconds = new_minutes * 60;
 
             match self
@@ -1437,7 +1401,6 @@ impl App {
         Ok(())
     }
 
-    // Settings
     pub async fn toggle_git_sync(&mut self) -> Result<()> {
         if let Some(config) = &self.config {
             let auto_commit = config
@@ -1500,7 +1463,6 @@ impl App {
         };
     }
 
-    // Profile Management
     pub async fn create_profile(&mut self, name: &str) -> Result<()> {
         let id = name.to_lowercase().replace(' ', "_");
         match self.client.profile_create(&id, name, None).await {
@@ -1520,7 +1482,6 @@ impl App {
             let id = profile.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let name = profile.get("name").and_then(|v| v.as_str()).unwrap_or("");
 
-            // Don't allow deleting current profile
             if id == self.profile_id {
                 self.status_message = "Cannot delete active profile!".to_string();
                 return Ok(());
@@ -1547,7 +1508,6 @@ impl App {
             self.profile_id = id.to_string();
             self.status_message = format!("Switched to profile: {}", name);
 
-            // Refresh data for new profile
             self.refresh_all().await?;
         }
         Ok(())
@@ -1555,7 +1515,6 @@ impl App {
 
     pub async fn rename_selected_profile(&mut self, new_name: &str) -> Result<()> {
         if let Some(mut profile) = self.profiles.get(self.selected_profile_index).cloned() {
-            // Update the name field
             if let Some(obj) = profile.as_object_mut() {
                 obj.insert(
                     "name".to_string(),
@@ -1578,16 +1537,13 @@ impl App {
 
     pub async fn toggle_report_profile(&mut self) -> Result<()> {
         if self.report_profile == "all" {
-            // Switch back to current profile
             self.report_profile = self.profile_id.clone();
             self.status_message = format!("Reports: Current Profile ({})", self.profile_id);
         } else {
-            // Switch to all profiles
             self.report_profile = "all".to_string();
             self.status_message = "Reports: All Profiles".to_string();
         }
 
-        // Refresh reports with new profile setting
         self.refresh_reports().await?;
         Ok(())
     }

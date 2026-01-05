@@ -1,8 +1,10 @@
 use crate::app::App;
+use chrono;
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, Borders, List, ListItem},
 };
 
@@ -22,7 +24,7 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
                 ListItem::new(""),
                 ListItem::new("  No entries for selected period."),
                 ListItem::new(""),
-                ListItem::new("  Use buttons above to filter by time period."),
+                ListItem::new("  Press [d]/[w]/[m] to change time period."),
             ]
         }
     } else {
@@ -30,12 +32,12 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, entry)| {
-                // Get entry ID for that professional look
-                let entry_id = entry
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .map(|id| &id[..8])
-                    .unwrap_or("????????");
+                let start_time_str = entry.get("start_time").and_then(|v| v.as_str()).unwrap_or("");
+                let start_time_display = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start_time_str) {
+                    dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()
+                } else {
+                    "--:--:--".to_string()
+                };
 
                 let duration_secs = entry
                     .get("duration_seconds")
@@ -44,10 +46,16 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
                 let hours = duration_secs / 3600;
                 let minutes = (duration_secs % 3600) / 60;
 
-                // Look up task name from task_id
+                let task_title = entry.get("task_title").and_then(|v| v.as_str());
                 let task_id = entry.get("task_id").and_then(|v| v.as_str());
 
-                let task_display = if let Some(tid) = task_id {
+                let task_display = if let Some(title) = task_title {
+                    if let Some(tid) = task_id {
+                        format!("{} [{}]", title, &tid[..8])
+                    } else {
+                        title.to_string()
+                    }
+                } else if let Some(tid) = task_id {
                     let task_name = app
                         .tasks
                         .iter()
@@ -56,7 +64,6 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
                         .and_then(|v| v.as_str())
                         .unwrap_or("Unknown task");
 
-                    // Show task name with UUID for that enterprise feel
                     format!("{} [{}]", task_name, &tid[..8])
                 } else {
                     "No task".to_string()
@@ -87,14 +94,14 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
                 };
 
                 let text = format!(
-                    "  {} {} {} │ {} │ {}",
+                    "  {} {} {} │ {:>7} │ {}",
                     mode_icon,
                     if i == app.selected_entry_index {
                         "→"
                     } else {
                         " "
                     },
-                    entry_id,
+                    start_time_display,
                     time_str,
                     task_display
                 );
@@ -104,19 +111,22 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = if app.entry_filter.is_empty() {
-        format!(
-            "📝 Time Entries ({}) | [d]elete [e]dit [f]ilter",
-            filtered_entries.len()
-        )
+        format!(" 📝 Time Entries ({}) ", filtered_entries.len())
     } else {
         format!(
-            "📝 Time Entries ({} matched filter '{}') | [d]elete [e]dit [f]ilter",
+            " 📝 Time Entries ({} matched filter '{}') ",
             filtered_entries.len(),
             app.entry_filter
         )
     };
 
-    let entries_list =
-        List::new(entry_items).block(Block::default().borders(Borders::ALL).title(title));
+    let bottom_hint = " [d]ay [w]eek [m]onth | [e]dit [f]ilter [del]ete ";
+
+    let entries_list = List::new(entry_items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_bottom(Line::from(bottom_hint).right_aligned()),
+    );
     f.render_widget(entries_list, area);
 }

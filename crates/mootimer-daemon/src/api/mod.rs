@@ -171,6 +171,20 @@ impl ApiHandler {
         }
     }
 
+    pub async fn shutdown(&self) {
+        tracing::info!("Stopping all active timers...");
+        let completed_timers = self.timer_manager.stop_all().await;
+        for (profile_id, entry) in completed_timers {
+            if let Err(e) = self.entry_manager.add(&profile_id, entry).await {
+                tracing::error!(
+                    "Failed to save entry for profile {} during shutdown: {}",
+                    profile_id,
+                    e
+                );
+            }
+        }
+    }
+
     pub fn subscribe_events(&self) -> broadcast::Receiver<DaemonEvent> {
         self.event_manager.subscribe()
     }

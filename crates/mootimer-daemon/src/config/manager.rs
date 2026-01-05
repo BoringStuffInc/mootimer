@@ -1,4 +1,3 @@
-//! Configuration manager
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -9,7 +8,6 @@ use mootimer_core::{
     storage::{ConfigStorage, init_config_dir},
 };
 
-/// Config manager error
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigManagerError {
     #[error("Storage error: {0}")]
@@ -21,7 +19,6 @@ pub enum ConfigManagerError {
 
 pub type Result<T> = std::result::Result<T, ConfigManagerError>;
 
-/// Manages application configuration
 pub struct ConfigManager {
     storage: ConfigStorage,
     config: Arc<RwLock<Config>>,
@@ -32,7 +29,6 @@ impl ConfigManager {
         let config_dir = init_config_dir()?;
         let storage = ConfigStorage::new(config_dir);
 
-        // Load or create default config
         let config = storage.load()?;
 
         Ok(Self {
@@ -46,15 +42,12 @@ impl ConfigManager {
     }
 
     pub async fn update(&self, config: Config) -> Result<Config> {
-        // Validate config
         config
             .validate()
             .map_err(|e| ConfigManagerError::Invalid(e.to_string()))?;
 
-        // Save to storage
         self.storage.save(&config)?;
 
-        // Update in-memory config
         {
             let mut current = self.config.write().await;
             *current = config.clone();
@@ -199,7 +192,7 @@ mod tests {
 
         let updated = manager
             .update_pomodoro_config(
-                Some(1800), // 30 minutes
+                Some(1800),
                 None,
                 None,
                 None,

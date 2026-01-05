@@ -1,5 +1,3 @@
-//! MooTimer TUI - Professional Time Tracking Interface
-
 mod app;
 mod ui;
 
@@ -7,7 +5,7 @@ use anyhow::Result;
 use app::{App, AppView, InputMode};
 use clap::Parser;
 use crossterm::{
-    event::{
+    event::{ 
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
     execute,
@@ -22,7 +20,6 @@ use std::io;
 use tokio::time::Duration;
 use tracing::info;
 
-/// Set up file logging
 fn setup_logging() -> Result<()> {
     let mut log_path = std::env::temp_dir();
     log_path.push("mootimer-tui.log");
@@ -63,7 +60,6 @@ struct Args {
     profile: Option<String>,
 }
 
-/// Send an OS notification
 fn send_os_notification(title: &str, body: &str) {
     if let Err(e) = notify_rust::Notification::new()
         .summary(title)
@@ -76,7 +72,6 @@ fn send_os_notification(title: &str, body: &str) {
     }
 }
 
-/// Send an OS notification with urgency
 fn send_urgent_notification(title: &str, body: &str) {
     let mut notification = notify_rust::Notification::new();
     notification
@@ -93,10 +88,9 @@ fn send_urgent_notification(title: &str, body: &str) {
     }
 }
 
-/// Print bell character for audio alert (respects app.audio_alerts_enabled)
 fn audio_alert(app: &App) {
     if app.audio_alerts_enabled {
-        print!("\x07"); // Bell character
+        print!("\x07");
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 }
@@ -180,6 +174,10 @@ async fn handle_daemon_notification(
                             app.status_message = format!("🍅 {} phase completed!", phase);
 
                             audio_alert(app);
+
+                            if phase == "short_break" || phase == "long_break" {
+                                app.input_mode = InputMode::PomodoroBreakFinished;
+                            }
 
                             let (title, body) = match phase {
                                 "work" => ("🍅 Work Complete!", "Time for a break!"),
@@ -267,7 +265,6 @@ async fn handle_mouse_event(
     term_size: ratatui::layout::Rect,
 ) -> Result<()> {
     if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
-        // Handle tab clicks (row 1, considering border at 0)
         if mouse.row == 1 {
             let tabs = [
                 ("1", "📊", "Dashboard", AppView::Dashboard),
@@ -278,51 +275,44 @@ async fn handle_mouse_event(
                 ("6", "📋", "Logs", AppView::Logs),
             ];
 
-            // Re-calculate layout to find click target (centering logic matching ui::draw_title_bar)
             let profile_name = app.get_profile_name();
-            // Prefix: "🐮 MooTimer " (11) + "[{profile}] │ "
-            // "🐮 " (2) + "MooTimer " (9) = 11
-            let prefix_width = 11 + 1 + profile_name.len() as u16 + 1 + 1 + 1 + 1; // [ + name + ] + sp + | + sp
+            let prefix_width = 11 + 1 + profile_name.len() as u16 + 1 + 1 + 1 + 1;
 
-            // Calculate total width first to find start X (since it's centered)
             let mut total_width = prefix_width;
             let mut tab_regions = Vec::new();
 
             for (i, (_key, _icon, name, view)) in tabs.iter().enumerate() {
                 if i > 0 {
                     total_width += 1;
-                } // spacer
+                }
 
                 let is_active = *view == app.current_view;
 
                 let content_width = if is_active {
-                    1 + 2 + name.len() as u16 + 1 // " " + icon(2) + name + " "
+                    1 + 2 + name.len() as u16 + 1
                 } else {
-                    1 + 1 + 1 + 2 + name.len() as u16 // "[" + key + "]" + icon(2) + name
+                    1 + 1 + 1 + 2 + name.len() as u16
                 };
 
                 tab_regions.push((*view, content_width));
                 total_width += content_width;
             }
 
-            total_width += 10; // Suffix: " │ [q]Quit" -> 1+1+1+1+1+1+4
+            total_width += 10;
 
             let start_x = (term_size.width.saturating_sub(total_width)) / 2;
-            let mut current_x = start_x + prefix_width; // Skip prefix
+            let mut current_x = start_x + prefix_width;
 
-            // Check against mouse X
             for (i, (view, width)) in tab_regions.iter().enumerate() {
                 if i > 0 {
                     current_x += 1;
-                } // spacer
+                }
 
                 if mouse.column >= current_x && mouse.column < current_x + width {
-                    // Sync logic before switching
                     let old_view = app.current_view;
                     let new_view = *view;
 
                     if old_view == AppView::Dashboard && new_view == AppView::Kanban {
-                        // Sync Dash -> Kanban
                         let sync_target = {
                             let filtered = app.get_filtered_tasks();
                             if let Some(task) = filtered.get(app.selected_task_index)
@@ -355,7 +345,6 @@ async fn handle_mouse_event(
                             }
                         }
                     } else if old_view == AppView::Kanban && new_view == AppView::Dashboard {
-                        // Sync Kanban -> Dash
                         let target_tid = {
                             let tasks = app.get_kanban_tasks(app.selected_column_index);
                             tasks
@@ -393,7 +382,6 @@ async fn handle_mouse_event(
                 current_x += width;
             }
         } else {
-            // Handle view-specific mouse events
             if app.current_view == AppView::Kanban {
                 handle_kanban_mouse(app, mouse, term_size).await?;
             }
@@ -407,7 +395,6 @@ async fn handle_kanban_mouse(
     mouse: event::MouseEvent,
     term_size: ratatui::layout::Rect,
 ) -> Result<()> {
-    // Content area roughly: Y=3 to Height-6
     if mouse.row >= 3 && mouse.row < term_size.height.saturating_sub(6) {
         let col_width = term_size.width.saturating_div(3);
         if col_width == 0 {
@@ -417,8 +404,6 @@ async fn handle_kanban_mouse(
 
         app.selected_column_index = col_idx;
 
-        // Calculate item index
-        // List starts at Y=3 (border), items at Y=4
         if mouse.row >= 4 {
             let item_idx = (mouse.row - 4) as usize;
             let tasks_len = app.get_kanban_tasks(col_idx).len();
@@ -438,10 +423,17 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
 
     if app.input_mode == InputMode::DeleteTaskConfirm
         || app.input_mode == InputMode::DeleteProfileConfirm
+        || app.input_mode == InputMode::ConfirmQuit
+        || app.input_mode == InputMode::PomodoroBreakFinished
     {
         match code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if app.input_mode == InputMode::DeleteTaskConfirm {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter | KeyCode::Char(' ') => {
+                if app.input_mode == InputMode::ConfirmQuit {
+                    app.should_quit = true;
+                } else if app.input_mode == InputMode::PomodoroBreakFinished {
+                    app.resume().await?;
+                    app.input_mode = InputMode::Normal;
+                } else if app.input_mode == InputMode::DeleteTaskConfirm {
                     app.delete_selected_task().await?;
                     app.input_mode = InputMode::Normal;
                 } else {
@@ -449,8 +441,14 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
                     app.input_mode = InputMode::Normal;
                 }
             }
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
+            KeyCode::Char('x') if app.input_mode == InputMode::PomodoroBreakFinished => {
+                app.stop_timer().await?;
                 app.input_mode = InputMode::Normal;
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
+                if app.input_mode != InputMode::PomodoroBreakFinished {
+                    app.input_mode = InputMode::Normal;
+                }
             }
             _ => {}
         }
@@ -459,12 +457,18 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
 
     if app.input_mode != InputMode::Normal {
         match code {
+            KeyCode::Tab | KeyCode::Down | KeyCode::Up if app.input_mode == InputMode::NewTask || app.input_mode == InputMode::EditTask => {
+                app.focused_input_field = if app.focused_input_field == 0 { 1 } else { 0 };
+            }
             KeyCode::Enter => {
                 app.submit_input().await?;
             }
             KeyCode::Esc => {
                 app.input_mode = InputMode::Normal;
                 app.input_buffer.clear();
+                app.input_buffer_2.clear();
+                app.focused_input_field = 0;
+                app.temp_task_title = None;
             }
             KeyCode::Char(c) => {
                 if modifiers.contains(KeyModifiers::CONTROL) {
@@ -472,11 +476,11 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
                         app.should_quit = true;
                     }
                 } else {
-                    app.input_buffer.push(c);
+                    app.handle_input_char(c);
                 }
             }
             KeyCode::Backspace => {
-                app.input_buffer.pop();
+                app.handle_input_backspace();
             }
             _ => {}
         }
@@ -488,7 +492,20 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             if app.show_help {
                 app.toggle_help();
             } else {
-                app.should_quit = true;
+                let is_running = if let Some(timer) = &app.timer_info
+                    && let Some(state) = timer.get("state").and_then(|v| v.as_str())
+                {
+                    state == "running" || state == "paused"
+                } else {
+                    false
+                };
+
+                if is_running {
+                    app.input_mode = InputMode::ConfirmQuit;
+                    print!("\x07");
+                } else {
+                    app.should_quit = true;
+                }
             }
         }
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => app.should_quit = true,
@@ -592,22 +609,8 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             app.refresh_logs().await?;
         }
 
-        KeyCode::Left | KeyCode::Char('h') => match app.current_view {
-            AppView::Settings => handle_settings_keys(app, code).await?,
-            AppView::Kanban => handle_kanban_keys(app, code, modifiers).await?,
-            _ => app.button_previous(),
-        },
-        KeyCode::Right | KeyCode::Char('l') => match app.current_view {
-            AppView::Settings => handle_settings_keys(app, code).await?,
-            AppView::Kanban => handle_kanban_keys(app, code, modifiers).await?,
-            _ => app.button_next(),
-        },
         KeyCode::PageUp => app.list_page_up(),
         KeyCode::PageDown => app.list_page_down(),
-
-        KeyCode::Enter => {
-            activate_selected_button(app).await?;
-        }
 
         _ => match app.current_view {
             AppView::Dashboard => handle_dashboard_keys(app, code, modifiers).await?,
@@ -622,225 +625,6 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
     Ok(())
 }
 
-/// Activates the currently selected button by simulating the button's shortcut key
-async fn activate_selected_button(app: &mut App) -> Result<()> {
-    use crate::app::{AppView, DashboardPane};
-
-    let button_index = app.selected_button_index;
-
-    match app.current_view {
-        AppView::Dashboard => {
-            match app.focused_pane {
-                DashboardPane::TimerConfig => {
-                    let timer_state = app
-                        .timer_info
-                        .as_ref()
-                        .and_then(|t| t.get("state"))
-                        .and_then(|s| s.as_str());
-
-                    match timer_state {
-                        Some("running") | Some("paused") => {
-                            // Buttons: Pause/Resume (0), Stop (1)
-                            match button_index {
-                                0 => app.toggle_pause().await?,
-                                1 => app.stop_timer().await?,
-                                _ => {}
-                            }
-                        }
-                        _ => {
-                            // Buttons: Start Timer (0), Type (1)
-                            match button_index {
-                                0 => app.start_selected_timer().await?,
-                                1 => app.cycle_timer_type(),
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                DashboardPane::TasksList => {
-                    // Buttons: New (0), Edit (1), Delete (2), Start Timer (3)
-                    match button_index {
-                        0 => {
-                            app.input_mode = InputMode::NewTask;
-                            app.input_buffer.clear();
-                            app.status_message = "Enter task title:".to_string();
-                        }
-                        1 => app.edit_selected_task().await?,
-                        2 => app.delete_selected_task().await?,
-                        3 => app.start_selected_timer().await?,
-                        _ => {}
-                    }
-                }
-                DashboardPane::ProfileList => {
-                    // Buttons: Switch (0), New (1), Delete (2), Rename (3)
-                    match button_index {
-                        0 => app.switch_to_selected_profile().await?,
-                        1 => {
-                            app.input_mode = InputMode::NewProfile;
-                            app.input_buffer.clear();
-                            app.status_message = "Enter profile name:".to_string();
-                        }
-                        2 => {
-                            if !app.profiles.is_empty() {
-                                app.input_mode = InputMode::DeleteProfileConfirm;
-                            }
-                        }
-                        3 => {
-                            app.input_mode = InputMode::RenameProfile;
-                            app.input_buffer.clear();
-                            app.status_message = "Enter new profile name:".to_string();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        AppView::Kanban => {
-            // Buttons: New Task (0), Edit (1), Delete (2), Start Timer (3)
-            match button_index {
-                0 => {
-                    app.input_mode = InputMode::NewTask;
-                    app.input_buffer.clear();
-                    app.status_message = "Enter task title:".to_string();
-                }
-                1 => {
-                    // Edit logic similar to handle_kanban_keys
-                    let title_to_edit = {
-                        let tasks = app.get_kanban_tasks(app.selected_column_index);
-                        if let Some(task) = tasks.get(app.selected_kanban_card_index) {
-                            task.get("title")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                        } else {
-                            None
-                        }
-                    };
-
-                    if let Some(title) = title_to_edit {
-                        app.input_mode = InputMode::EditTask;
-                        // Map selection
-                        let task_id = {
-                            let tasks = app.get_kanban_tasks(app.selected_column_index);
-                            tasks
-                                .get(app.selected_kanban_card_index)
-                                .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                                .map(|s| s.to_string())
-                        };
-
-                        if let Some(tid) = task_id
-                            && let Some(idx) = app
-                                .tasks
-                                .iter()
-                                .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                        {
-                            app.selected_task_index = idx;
-                        }
-
-                        app.input_buffer = title;
-                        app.status_message = "Edit task title:".to_string();
-                    }
-                }
-                2 => {
-                    // Delete logic
-                    let task_id = {
-                        let tasks = app.get_kanban_tasks(app.selected_column_index);
-                        tasks
-                            .get(app.selected_kanban_card_index)
-                            .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                            .map(|s| s.to_string())
-                    };
-
-                    if let Some(tid) = task_id
-                        && let Some(idx) = app
-                            .tasks
-                            .iter()
-                            .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                    {
-                        app.selected_task_index = idx;
-                        app.input_mode = InputMode::DeleteTaskConfirm;
-                    }
-                }
-                3 => {
-                    // Start Timer
-                    let task_id = {
-                        let tasks = app.get_kanban_tasks(app.selected_column_index);
-                        tasks
-                            .get(app.selected_kanban_card_index)
-                            .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                            .map(|s| s.to_string())
-                    };
-
-                    if let Some(tid) = task_id
-                        && let Some(idx) = app
-                            .tasks
-                            .iter()
-                            .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                    {
-                        app.selected_task_index = idx;
-                        app.start_selected_timer().await?;
-                    }
-                }
-                _ => {}
-            }
-        }
-        AppView::Entries => {
-            // Buttons: Today (0), This Week (1), This Month (2), Refresh (3)
-            match button_index {
-                0 => app.show_entries_for_day().await?,
-                1 => app.show_entries_for_week().await?,
-                2 => app.show_entries_for_month().await?,
-                3 => app.refresh_entries().await?,
-                _ => {}
-            }
-        }
-        AppView::Reports => {
-            // Buttons: Daily (0), Weekly (1), Monthly (2), Toggle Profile (3), Refresh (4)
-            match button_index {
-                0 => {
-                    app.report_period = "day".to_string();
-                    app.refresh_reports().await?;
-                }
-                1 => {
-                    app.report_period = "week".to_string();
-                    app.refresh_reports().await?;
-                }
-                2 => {
-                    app.report_period = "month".to_string();
-                    app.refresh_reports().await?;
-                }
-                3 => app.toggle_report_profile().await?,
-                4 => app.refresh_reports().await?,
-                _ => {}
-            }
-        }
-        AppView::Settings => {
-            // No buttons in Settings
-        }
-        AppView::Logs => {
-            // Buttons: Refresh (0), Clear (1)
-            match button_index {
-                0 => app.refresh_logs().await?,
-                1 => {
-                    use mootimer_core::storage::init_data_dir;
-                    use std::fs;
-
-                    let data_dir = init_data_dir()?;
-                    let log_file_path = data_dir.join("daemon.log");
-
-                    if log_file_path.exists() {
-                        fs::write(&log_file_path, "")?;
-                        app.log_lines.clear();
-                        app.status_message = "Logs cleared".to_string();
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    Ok(())
-}
-
 async fn handle_dashboard_keys(
     app: &mut App,
     code: KeyCode,
@@ -848,7 +632,6 @@ async fn handle_dashboard_keys(
 ) -> Result<()> {
     use crate::app::DashboardPane;
 
-    // Helper to check if timer is running
     let is_timer_active = if let Some(timer) = &app.timer_info {
         if let Some(state) = timer.get("state").and_then(|v| v.as_str()) {
             state == "running" || state == "paused"
@@ -859,19 +642,15 @@ async fn handle_dashboard_keys(
         false
     };
 
-    // Context-aware keybinds based on which pane is focused
     match app.focused_pane {
         DashboardPane::TimerConfig => {
-            // Timer pane is focused - handle timer-specific controls
             match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    // Adjust duration up (only if no timer running)
                     if app.timer_info.is_none() {
                         app.adjust_timer_duration_up();
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    // Adjust duration down (only if no timer running)
                     if app.timer_info.is_none() {
                         app.adjust_timer_duration_down();
                     }
@@ -887,27 +666,22 @@ async fn handle_dashboard_keys(
                     app.start_selected_timer().await?;
                 }
                 KeyCode::Char('x') => {
-                    // Stop timer (works regardless of focus)
                     app.stop_timer().await?;
                 }
                 KeyCode::Char('r') => {
-                    // Refresh (works regardless of focus)
                     app.status_message = "Refreshing...".to_string();
                     app.refresh_all().await?;
                     app.status_message = "Refreshed!".to_string();
                 }
-                // Note: Tab is handled at the global level for timer type cycling
                 _ => {}
             }
         }
         DashboardPane::TasksList => {
-            // Tasks pane is focused - handle task-specific controls
             match code {
                 KeyCode::Up | KeyCode::Char('k') => {
                     if is_timer_active {
                         app.status_message =
                             "Cannot change task while timer is running!".to_string();
-                        // Audio alert for error
                         print!("\x07");
                     } else {
                         app.list_previous();
@@ -928,7 +702,6 @@ async fn handle_dashboard_keys(
                             "Cannot change task while timer is running!".to_string();
                         print!("\x07");
                     } else {
-                        // Jump to top (vim style)
                         app.selected_task_index = 0;
                     }
                 }
@@ -938,15 +711,15 @@ async fn handle_dashboard_keys(
                             "Cannot change task while timer is running!".to_string();
                         print!("\x07");
                     } else {
-                        // Jump to bottom (vim style)
                         app.selected_task_index = app.tasks.len().saturating_sub(1);
                     }
                 }
                 KeyCode::Char('n') => {
-                    // New task
                     app.input_mode = InputMode::NewTask;
                     app.input_buffer.clear();
-                    app.status_message = "Enter task title:".to_string();
+                    app.input_buffer_2.clear();
+                    app.focused_input_field = 0;
+                    app.status_message = "New Task".to_string();
                 }
                 KeyCode::Char('v') => {
                     app.show_task_description = !app.show_task_description;
@@ -957,19 +730,16 @@ async fn handle_dashboard_keys(
                     };
                 }
                 KeyCode::Char('/') => {
-                    // Search tasks
                     app.input_mode = InputMode::SearchTasks;
                     app.input_buffer.clear();
                     app.status_message = "Search tasks:".to_string();
                 }
                 KeyCode::Char('d') => {
-                    // Delete selected task
                     if !app.tasks.is_empty() {
                         app.input_mode = InputMode::DeleteTaskConfirm;
                     }
                 }
                 KeyCode::Char('a') => {
-                    // Archive selected task
                     let filtered_tasks = app.get_filtered_tasks();
                     if let Some(task) = filtered_tasks.get(app.selected_task_index)
                         && let Some(id) = task.get("id").and_then(|v| v.as_str())
@@ -980,7 +750,7 @@ async fn handle_dashboard_keys(
                 }
                 KeyCode::Char('A') if modifiers.contains(KeyModifiers::SHIFT) => {
                     app.show_archived = !app.show_archived;
-                    app.selected_task_index = 0; // Reset selection
+                    app.selected_task_index = 0;
                     app.status_message = if app.show_archived {
                         "Viewing ARCHIVED tasks".to_string()
                     } else {
@@ -988,11 +758,9 @@ async fn handle_dashboard_keys(
                     };
                 }
                 KeyCode::Char('e') => {
-                    // Edit selected task
                     app.edit_selected_task().await?;
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    // When in task list, Enter/Space starts timer with selected task
                     if let Some(timer) = &app.timer_info
                         && let Some(state) = timer.get("state").and_then(|v| v.as_str())
                         && (state == "running" || state == "paused")
@@ -1003,11 +771,9 @@ async fn handle_dashboard_keys(
                     app.start_selected_timer().await?;
                 }
                 KeyCode::Char('x') => {
-                    // Stop timer (works regardless of focus)
                     app.stop_timer().await?;
                 }
                 KeyCode::Char('r') => {
-                    // Refresh (works regardless of focus)
                     app.status_message = "Refreshing...".to_string();
                     app.refresh_all().await?;
                     app.status_message = "Refreshed!".to_string();
@@ -1051,7 +817,6 @@ async fn handle_dashboard_keys(
 }
 
 async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> Result<()> {
-    // Auto-clamp selection to valid range on any interaction
     let col_len = app.get_kanban_tasks(app.selected_column_index).len();
     if app.selected_kanban_card_index >= col_len && col_len > 0 {
         app.selected_kanban_card_index = col_len.saturating_sub(1);
@@ -1062,10 +827,8 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
     match code {
         KeyCode::Left | KeyCode::Char('h') => {
             if modifiers.contains(KeyModifiers::SHIFT) {
-                // Move card left
                 app.move_kanban_card(-1).await?;
             } else {
-                // Navigate columns left
                 if app.selected_column_index > 0 {
                     app.selected_column_index -= 1;
                     app.selected_kanban_card_index = 0;
@@ -1074,10 +837,8 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
         }
         KeyCode::Right | KeyCode::Char('l') => {
             if modifiers.contains(KeyModifiers::SHIFT) {
-                // Move card right
                 app.move_kanban_card(1).await?;
             } else {
-                // Navigate columns right
                 if app.selected_column_index < 2 {
                     app.selected_column_index += 1;
                     app.selected_kanban_card_index = 0;
@@ -1095,14 +856,25 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
                 app.selected_kanban_card_index += 1;
             }
         }
-        KeyCode::Char('H') => app.move_kanban_card(-1).await?, // Fallback for Shift+h if not caught above
-        KeyCode::Char('L') => app.move_kanban_card(1).await?,  // Fallback for Shift+l
+        KeyCode::Char('H') => app.move_kanban_card(-1).await?,
+        KeyCode::Char('L') => app.move_kanban_card(1).await?,
 
-        // Actions
+        KeyCode::Char('A') if modifiers.contains(KeyModifiers::SHIFT) => {
+            app.show_archived = !app.show_archived;
+            app.selected_column_index = 0;
+            app.selected_kanban_card_index = 0;
+            app.status_message = if app.show_archived {
+                "Viewing ARCHIVED tasks".to_string()
+            } else {
+                "Viewing ACTIVE tasks".to_string()
+            };
+        }
         KeyCode::Char('n') => {
             app.input_mode = InputMode::NewTask;
             app.input_buffer.clear();
-            app.status_message = "Enter task title:".to_string();
+            app.input_buffer_2.clear();
+            app.focused_input_field = 0;
+            app.status_message = "New Task".to_string();
         }
         KeyCode::Char('v') => {
             app.show_task_description = !app.show_task_description;
@@ -1113,7 +885,6 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
             };
         }
         KeyCode::Char('e') => {
-            // Edit selected kanban task
             let title_to_edit = {
                 let tasks = app.get_kanban_tasks(app.selected_column_index);
                 if let Some(task) = tasks.get(app.selected_kanban_card_index) {
@@ -1127,10 +898,6 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
 
             if let Some(title) = title_to_edit {
                 app.input_mode = InputMode::EditTask;
-                // Note: submit_input currently assumes `selected_task_index` from the main list.
-                // We need to map `selected_kanban_card_index` to `selected_task_index` or update `submit_input` to handle Kanban selection.
-                // This is a tricky dependency.
-                // EASIER: Find the index of this task in `app.tasks` and set `selected_task_index`.
                 let task_id = {
                     let tasks = app.get_kanban_tasks(app.selected_column_index);
                     tasks
@@ -1153,8 +920,6 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
             }
         }
         KeyCode::Char('d') => {
-            // Delete selected kanban task
-            // Similar mapping required
             let task_id = {
                 let tasks = app.get_kanban_tasks(app.selected_column_index);
                 tasks
@@ -1174,7 +939,6 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
             }
         }
         KeyCode::Char('a') => {
-            // Archive selected kanban task
             let task_id = {
                 let tasks = app.get_kanban_tasks(app.selected_column_index);
                 tasks
@@ -1188,7 +952,6 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
             }
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
-            // Start timer
             let task_id = {
                 let tasks = app.get_kanban_tasks(app.selected_column_index);
                 tasks
@@ -1395,14 +1158,11 @@ async fn handle_logs_keys(app: &mut App, code: KeyCode) -> Result<()> {
     Ok(())
 }
 
-/// Sync on startup - pull latest changes from remote if sync is enabled
 async fn startup_sync(client: &MooTimerClient) {
-    // Wrap entire sync in a timeout to prevent blocking startup
     let sync_future = async {
-        // Check if sync is initialized
         let status = match client.call("sync.status", None).await {
             Ok(status) => status,
-            Err(_) => return, // Silently skip if sync.status fails
+            Err(_) => return,
         };
 
         let initialized = status
@@ -1411,26 +1171,20 @@ async fn startup_sync(client: &MooTimerClient) {
             .unwrap_or(false);
 
         if !initialized {
-            // Git not initialized, skip sync (silent)
             return;
         }
 
-        // Try to sync (pull latest changes) - silently
         let _ = client.call("sync.sync", None).await;
     };
 
-    // Timeout after 3 seconds to avoid blocking startup
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(3), sync_future).await;
 }
 
-/// Sync on shutdown - commit and push changes if auto-sync is enabled
 async fn shutdown_sync(client: &MooTimerClient) {
-    // Wrap entire sync in a timeout to prevent blocking exit
     let sync_future = async {
-        // Check if sync is initialized
         let status = match client.call("sync.status", None).await {
             Ok(status) => status,
-            Err(_) => return, // Silently skip if sync.status fails
+            Err(_) => return,
         };
 
         let initialized = status
@@ -1439,11 +1193,9 @@ async fn shutdown_sync(client: &MooTimerClient) {
             .unwrap_or(false);
 
         if !initialized {
-            // Git not initialized, skip sync
             return;
         }
 
-        // Auto-commit on exit (silently)
         let _ = client
             .call(
                 "sync.commit",
@@ -1451,10 +1203,9 @@ async fn shutdown_sync(client: &MooTimerClient) {
             )
             .await;
 
-        // Check if auto_push is enabled
         let config = match client.call("config.get", None).await {
             Ok(config) => config,
-            Err(_) => return, // Can't get config, skip push
+            Err(_) => return,
         };
 
         let auto_push = config
@@ -1464,15 +1215,12 @@ async fn shutdown_sync(client: &MooTimerClient) {
             .unwrap_or(false);
 
         if !auto_push {
-            // Auto-push disabled, we're done
             return;
         }
 
-        // Auto-push to remote (silently)
         let _ = client.call("sync.sync", None).await;
     };
 
-    // Timeout after 5 seconds to avoid blocking exit
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), sync_future).await;
 }
 
@@ -1484,23 +1232,15 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Get default profile or use "default"
     let profile_id = args.profile.unwrap_or_else(|| "default".to_string());
 
-    // Create client
     let client = MooTimerClient::new(&args.socket);
 
-    // Track daemon child process if WE started it (so we can clean up on exit)
-    let mut daemon_child: Option<tokio::process::Child> = None;
-
-    // Try to connect and get profile list
     let profiles = match client.profile_list().await {
         Ok(profiles) => profiles,
         Err(_) => {
-            // Daemon not running, try to start it
             eprintln!("🐮 MooTimer daemon not running. Starting it...");
 
-            // Try to find mootimerd in PATH
             let daemon_result = tokio::process::Command::new("mootimerd")
                 .arg("--socket")
                 .arg(&args.socket)
@@ -1512,20 +1252,16 @@ async fn main() -> Result<()> {
                 Ok(mut child) => {
                     eprintln!("✓ Daemon started (PID: {})", child.id().unwrap_or(0));
 
-                    // Give daemon time to start
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                    // Try connecting again
                     match client.profile_list().await {
                         Ok(profiles) => {
-                            // Success! Store child process for later cleanup
-                            daemon_child = Some(child);
                             profiles
                         }
                         Err(e) => {
                             eprintln!("✗ Failed to connect to daemon after starting: {}", e);
                             eprintln!("\nTry running manually: mootimerd");
-                            let _ = child.kill().await; // Kill the daemon we just started
+                            let _ = child.kill().await;
                             std::process::exit(1);
                         }
                     }
@@ -1540,7 +1276,6 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Check if the profile exists, if not create it
     let profile_exists = profiles
         .as_array()
         .map(|arr| {
@@ -1567,43 +1302,33 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Sync on startup - pull latest changes if sync is enabled
     startup_sync(&client).await;
 
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Subscribe to daemon notifications BEFORE creating app (moves client)
     let mut notif_rx = client.subscribe_notifications().await?;
 
-    // Create app state (moves client)
     let mut app = App::new(client, profile_id);
 
-    // Initial data load
     app.refresh_all().await?;
 
     let mut last_tick = std::time::Instant::now();
 
-    // Main loop
     loop {
-        // Draw UI
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
         if app.should_quit {
             break;
         }
 
-        // Event-driven loop - wait for daemon events or keyboard input
         tokio::select! {
-            // Daemon notifications (timer events, etc)
             Some(notification) = notif_rx.recv() => {
                 let _ = handle_daemon_notification(&mut app, notification).await;
             }
-            // Input events
             _ = tokio::time::sleep(Duration::from_millis(16)) => {
                 if last_tick.elapsed() >= Duration::from_millis(30) {
                     app.tomato_state.tick();
@@ -1611,7 +1336,6 @@ async fn main() -> Result<()> {
                     last_tick = std::time::Instant::now();
                 }
 
-                // Check for events (60 FPS max)
                 if event::poll(Duration::from_millis(0))? {
                     let event = event::read()?;
                     info!(?event, "Received event");
@@ -1626,11 +1350,9 @@ async fn main() -> Result<()> {
                         }
                         Event::Resize(width, height) => {
                             info!(width, height, "Terminal resized");
-                            // Do nothing, redraw on next loop iteration is sufficient
                         },
                         Event::FocusGained | Event::FocusLost => {
                             info!("Terminal focus changed");
-                            // Also do nothing, but acknowledge the event
                         },
                         _ => {}
                     }
@@ -1639,24 +1361,8 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Sync on shutdown - commit and push changes if enabled
     shutdown_sync(&app.client).await;
 
-    // Shutdown daemon if we started it
-    if let Some(mut child) = daemon_child {
-        eprintln!("🐮 Shutting down daemon...");
-        let _ = child.kill().await;
-
-        // Wait for it to exit gracefully (with timeout)
-        let shutdown_timeout = tokio::time::Duration::from_secs(2);
-        match tokio::time::timeout(shutdown_timeout, child.wait()).await {
-            Ok(Ok(status)) => eprintln!("✓ Daemon stopped ({})", status),
-            Ok(Err(e)) => eprintln!("⚠ Daemon exit error: {}", e),
-            Err(_) => eprintln!("⚠ Daemon shutdown timeout"),
-        }
-    }
-
-    // Restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

@@ -1,4 +1,3 @@
-/// Test countdown completion - verifies that timer.get doesn't hang when countdown completes
 use mootimer_client::MooTimerClient;
 use std::time::{Duration, Instant};
 
@@ -8,7 +7,6 @@ async fn main() -> anyhow::Result<()> {
 
     println!("=== Countdown Completion Test ===\n");
 
-    // Start a very short countdown (2 minutes) so it completes quickly
     println!("Starting 2-minute countdown timer...");
     let start = Instant::now();
     let result = client
@@ -16,9 +14,8 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("✓ Timer started: {:?}\n", result);
 
-    // Poll the timer status every 0.5 seconds until it completes
     let mut prev_state = "running".to_string();
-    let timeout = Duration::from_secs(130); // Give it 130 seconds (timeout for 2min + 10sec buffer)
+    let timeout = Duration::from_secs(130);
 
     println!("Polling timer status every 0.5 seconds...");
     println!("(Testing that timer.get doesn't hang when countdown completes)\n");
@@ -27,7 +24,6 @@ async fn main() -> anyhow::Result<()> {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let elapsed = start.elapsed();
 
-        // Test that timer.get doesn't hang
         println!("[{:>3}s] Calling timer.get...", elapsed.as_secs());
         let timer_result = client.timer_get("test_profile").await;
 
@@ -61,7 +57,6 @@ async fn main() -> anyhow::Result<()> {
                     println!();
                 }
 
-                // Check if timer is done
                 if state == "stopped" || state == "completed" {
                     println!("\n✓ Timer completed successfully!");
                     println!("  Total elapsed real time: {:?}", elapsed);
@@ -69,7 +64,6 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
 
-                // Check if timer was auto-removed (countdown feature)
                 if timer.is_null() || state == "not_found" {
                     println!("\n✓ Timer auto-removed after completion!");
                     println!("  Total elapsed real time: {:?}", elapsed);
@@ -77,7 +71,6 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
-                // If timer.get returns an error for "not found", that's OK - it means it was auto-completed
                 if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
                     println!("        NotFound (auto-completed) ✓");
                     println!("\n✓ Timer auto-removed after completion!");

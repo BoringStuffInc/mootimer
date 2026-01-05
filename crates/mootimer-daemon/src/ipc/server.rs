@@ -1,4 +1,3 @@
-//! IPC server implementation
 
 use std::path::Path;
 use std::sync::Arc;
@@ -9,7 +8,6 @@ use super::connection::ConnectionError;
 use super::protocol::{JsonRpcError, Notification, Request, Response};
 use crate::api::ApiHandler;
 
-/// IPC server error
 #[derive(Debug, thiserror::Error)]
 pub enum IpcServerError {
     #[error("IO error: {0}")]
@@ -27,14 +25,12 @@ pub enum IpcServerError {
 
 pub type Result<T> = std::result::Result<T, IpcServerError>;
 
-/// IPC server for handling client connections
 pub struct IpcServer {
     socket_path: String,
     api_handler: Arc<ApiHandler>,
 }
 
 impl IpcServer {
-    /// Create a new IPC server
     pub fn new(socket_path: String, api_handler: Arc<ApiHandler>) -> Self {
         Self {
             socket_path,
@@ -42,15 +38,12 @@ impl IpcServer {
         }
     }
 
-    /// Start the IPC server
     pub async fn start(self: Arc<Self>) -> Result<()> {
-        // Remove existing socket file if it exists
         let path = Path::new(&self.socket_path);
         if path.exists() {
             std::fs::remove_file(path)?;
         }
 
-        // Bind to Unix socket
         let listener = UnixListener::bind(&self.socket_path)?;
         tracing::info!("IPC server listening on {}", self.socket_path);
 
@@ -71,7 +64,6 @@ impl IpcServer {
         }
     }
 
-    /// Handle a client connection
     async fn handle_connection(&self, stream: UnixStream) -> Result<()> {
         tracing::debug!("New client connected");
 
@@ -79,15 +71,12 @@ impl IpcServer {
         let mut reader = tokio::io::BufReader::new(read_half);
         let mut writer = tokio::io::BufWriter::new(write_half);
 
-        // Subscribe to all daemon events
         let mut event_rx = self.api_handler.subscribe_events();
 
-        // Spawn task to forward daemon events as notifications to client
         let (notif_tx, mut notif_rx) = mpsc::channel::<Notification>(100);
         tokio::spawn(async move {
             tracing::info!("IPC: Event forwarder task started");
             while let Ok(event) = event_rx.recv().await {
-                // Convert DaemonEvent to Notification with appropriate method
                 use crate::events::DaemonEvent;
                 let (method, params) = match &event {
                     DaemonEvent::Timer(e) => {
@@ -116,16 +105,14 @@ impl IpcServer {
 
                 if notif_tx.send(notification).await.is_err() {
                     tracing::info!("IPC: Event forwarder stopping - client disconnected");
-                    break; // Client disconnected
+                    break;
                 }
             }
             tracing::info!("IPC: Event forwarder task stopped");
         });
 
-        // Handle both requests and notifications using select!
         loop {
             tokio::select! {
-                // Handle incoming requests
                 result = Self::read_request_from(&mut reader) => {
                     match result {
                         Ok(request) => {
@@ -146,7 +133,6 @@ impl IpcServer {
                         }
                     }
                 }
-                // Forward notifications to client
                 Some(notification) = notif_rx.recv() => {
                     tracing::info!("IPC: Sending notification to client: {}", notification.method);
                     if let Err(e) = Self::write_notification_to(&mut writer, &notification).await {
@@ -161,7 +147,6 @@ impl IpcServer {
         Ok(())
     }
 
-    /// Read a request from the reader
     async fn read_request_from(
         reader: &mut tokio::io::BufReader<tokio::io::ReadHalf<UnixStream>>,
     ) -> Result<Request> {
@@ -178,7 +163,6 @@ impl IpcServer {
         Ok(request)
     }
 
-    /// Write a response to the writer
     async fn write_response_to(
         writer: &mut tokio::io::BufWriter<tokio::io::WriteHalf<UnixStream>>,
         response: &Response,
@@ -192,7 +176,6 @@ impl IpcServer {
         Ok(())
     }
 
-    /// Write a notification to the writer
     async fn write_notification_to(
         writer: &mut tokio::io::BufWriter<tokio::io::WriteHalf<UnixStream>>,
         notification: &Notification,
@@ -206,14 +189,11 @@ impl IpcServer {
         Ok(())
     }
 
-    /// Handle a JSON-RPC request
     async fn handle_request(&self, request: Request) -> Response {
-        // Validate request
         if let Err(error) = request.validate() {
             return Response::error(error, request.id);
         }
 
-        // Route to API handler
         match self
             .api_handler
             .handle(&request.method, request.params)
@@ -265,6 +245,5 @@ mod tests {
         ));
 
         let _server = IpcServer::new(socket_path, api_handler);
-        // Server created successfully
     }
 }

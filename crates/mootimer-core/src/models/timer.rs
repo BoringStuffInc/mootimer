@@ -1,5 +1,3 @@
-//! Timer state models
-
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -10,16 +8,16 @@ use super::{PomodoroConfig, TimerMode};
 pub struct ActiveTimer {
     pub profile_id: String,
     pub task_id: Option<String>,
+    pub task_title: Option<String>,
     pub mode: TimerMode,
     pub state: TimerState,
     pub start_time: DateTime<Utc>,
     pub pause_time: Option<DateTime<Utc>>,
     pub elapsed_seconds: u64,
-    /// Accumulated work time (excluding current session if running)
     #[serde(default)]
     pub accumulated_work_time: u64,
     pub pomodoro_state: Option<PomodoroState>,
-    pub target_duration: Option<u64>, // For countdown timers (in seconds)
+    pub target_duration: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,11 +45,11 @@ pub enum PomodoroPhase {
 }
 
 impl ActiveTimer {
-    /// Create a new manual timer
-    pub fn new_manual(profile_id: String, task_id: Option<String>) -> Self {
+    pub fn new_manual(profile_id: String, task_id: Option<String>, task_title: Option<String>) -> Self {
         Self {
             profile_id,
             task_id,
+            task_title,
             mode: TimerMode::Manual,
             state: TimerState::Running,
             start_time: Utc::now(),
@@ -63,16 +61,17 @@ impl ActiveTimer {
         }
     }
 
-    /// Create a new pomodoro timer
     pub fn new_pomodoro(
         profile_id: String,
         task_id: Option<String>,
+        task_title: Option<String>,
         config: PomodoroConfig,
     ) -> Self {
         let now = Utc::now();
         Self {
             profile_id,
             task_id,
+            task_title,
             mode: TimerMode::Pomodoro,
             state: TimerState::Running,
             start_time: now,
@@ -89,15 +88,16 @@ impl ActiveTimer {
         }
     }
 
-    /// Create a new countdown timer
     pub fn new_countdown(
         profile_id: String,
         task_id: Option<String>,
+        task_title: Option<String>,
         duration_minutes: u64,
     ) -> Self {
         Self {
             profile_id,
             task_id,
+            task_title,
             mode: TimerMode::Countdown,
             state: TimerState::Running,
             start_time: Utc::now(),
@@ -109,7 +109,6 @@ impl ActiveTimer {
         }
     }
 
-    /// Pause the timer
     pub fn pause(&mut self) -> Result<()> {
         if self.state != TimerState::Running {
             return Err(Error::InvalidData("Timer is not running".to_string()));
@@ -120,7 +119,6 @@ impl ActiveTimer {
         Ok(())
     }
 
-    /// Resume the timer
     pub fn resume(&mut self) -> Result<()> {
         if self.state != TimerState::Paused {
             return Err(Error::InvalidData("Timer is not paused".to_string()));
@@ -132,10 +130,8 @@ impl ActiveTimer {
                 .num_seconds()
                 .max(0) as u64;
 
-            // Adjust start time to account for pause
             self.start_time += chrono::Duration::seconds(pause_duration as i64);
 
-            // Adjust pomodoro phase start time
             if let Some(ref mut pomo) = self.pomodoro_state {
                 pomo.phase_start_time += chrono::Duration::seconds(pause_duration as i64);
             }
@@ -146,19 +142,16 @@ impl ActiveTimer {
         Ok(())
     }
 
-    /// Stop the timer
     pub fn stop(&mut self) {
         self.elapsed_seconds = self.current_elapsed();
         self.state = TimerState::Stopped;
     }
 
-    /// Get current elapsed time in seconds (Work Time)
     pub fn current_elapsed(&self) -> u64 {
         match self.mode {
             TimerMode::Pomodoro => {
                 let mut total = self.accumulated_work_time;
 
-                // If currently in Work phase, add current session duration
                 if let Some(ref pomo) = self.pomodoro_state
                     && pomo.phase.is_work()
                     && self.state != TimerState::Stopped
@@ -169,7 +162,6 @@ impl ActiveTimer {
                 total
             }
             _ => {
-                // Manual/Countdown: Simple start time diff
                 match self.state {
                     TimerState::Running => Utc::now()
                         .signed_duration_since(self.start_time)
@@ -191,7 +183,6 @@ impl ActiveTimer {
         }
     }
 
-    /// Get time elapsed in current phase (for UI / Pomodoro logic)
     pub fn current_phase_elapsed(&self) -> u64 {
         if let Some(ref pomo) = self.pomodoro_state {
             let end_time = if self.state == TimerState::Paused {
@@ -209,7 +200,6 @@ impl ActiveTimer {
         }
     }
 
-    /// Get remaining time for pomodoro timers (None for manual timers)
     pub fn remaining_seconds(&self) -> Option<u64> {
         if let Some(ref pomo) = self.pomodoro_state {
             let phase_duration = pomo.phase.duration(&pomo.config);
@@ -221,7 +211,6 @@ impl ActiveTimer {
         }
     }
 
-    /// Check if pomodoro phase is complete
     pub fn is_phase_complete(&self) -> bool {
         if let Some(0) = self.remaining_seconds() {
             return true;
@@ -229,18 +218,13 @@ impl ActiveTimer {
         false
     }
 
-    /// Advance to next pomodoro phase
     pub fn next_phase(&mut self) -> Result<()> {
         let pomo = self
             .pomodoro_state
             .as_mut()
             .ok_or_else(|| Error::InvalidData("Not a pomodoro timer".to_string()))?;
 
-        // If completing a Work phase, add to accumulated_work_time
         if pomo.phase.is_work() {
-            // We assume next_phase is called when phase is complete, i.e., elapsed == duration
-            // But to be safe and accurate, we calculate it based on duration or actual elapsed?
-            // Since we are switching precisely when it ends (triggered by tick), we can use duration.
             let duration = pomo.phase.duration(&pomo.config);
             self.accumulated_work_time += duration;
         }
@@ -255,7 +239,7 @@ impl ActiveTimer {
             }
             PomodoroPhase::ShortBreak => (PomodoroPhase::Work, pomo.current_session + 1),
             PomodoroPhase::LongBreak => {
-                (PomodoroPhase::Work, 1) // Reset session count
+                (PomodoroPhase::Work, 1)
             }
         };
 
@@ -266,29 +250,24 @@ impl ActiveTimer {
         Ok(())
     }
 
-    /// Check if this is a pomodoro timer
     pub fn is_pomodoro(&self) -> bool {
         self.pomodoro_state.is_some()
     }
 
-    /// Check if timer is running
     pub fn is_running(&self) -> bool {
         self.state == TimerState::Running
     }
 
-    /// Check if timer is paused
     pub fn is_paused(&self) -> bool {
         self.state == TimerState::Paused
     }
 
-    /// Check if timer is stopped
     pub fn is_stopped(&self) -> bool {
         self.state == TimerState::Stopped
     }
 }
 
 impl PomodoroPhase {
-    /// Get the duration for this phase based on config
     pub fn duration(&self, config: &PomodoroConfig) -> u64 {
         match self {
             PomodoroPhase::Work => config.work_duration,
@@ -297,7 +276,6 @@ impl PomodoroPhase {
         }
     }
 
-    /// Get a human-readable string for the phase
     pub fn as_str(&self) -> &'static str {
         match self {
             PomodoroPhase::Work => "Work",
@@ -306,12 +284,10 @@ impl PomodoroPhase {
         }
     }
 
-    /// Check if this is a work phase
     pub fn is_work(&self) -> bool {
         matches!(self, PomodoroPhase::Work)
     }
 
-    /// Check if this is a break phase
     pub fn is_break(&self) -> bool {
         !self.is_work()
     }
@@ -323,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_new_manual_timer() {
-        let timer = ActiveTimer::new_manual("test_profile".to_string(), None);
+        let timer = ActiveTimer::new_manual("test_profile".to_string(), None, None);
         assert_eq!(timer.profile_id, "test_profile");
         assert_eq!(timer.mode, TimerMode::Manual);
         assert!(timer.is_running());
@@ -336,6 +312,7 @@ mod tests {
         let timer = ActiveTimer::new_pomodoro(
             "test_profile".to_string(),
             Some("task-123".to_string()),
+            Some("Task".to_string()),
             config,
         );
 
@@ -351,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_pause_resume() {
-        let mut timer = ActiveTimer::new_manual("test".to_string(), None);
+        let mut timer = ActiveTimer::new_manual("test".to_string(), None, None);
 
         assert!(timer.pause().is_ok());
         assert!(timer.is_paused());
@@ -362,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_pause_not_running() {
-        let mut timer = ActiveTimer::new_manual("test".to_string(), None);
+        let mut timer = ActiveTimer::new_manual("test".to_string(), None, None);
         timer.stop();
 
         assert!(timer.pause().is_err());
@@ -370,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_stop_timer() {
-        let mut timer = ActiveTimer::new_manual("test".to_string(), None);
+        let mut timer = ActiveTimer::new_manual("test".to_string(), None, None);
         std::thread::sleep(std::time::Duration::from_millis(1100));
 
         timer.stop();
@@ -408,7 +385,6 @@ mod tests {
 
         let mut timer = ActiveTimer::new_pomodoro("test".to_string(), None, config);
 
-        // First work -> short break
         timer.next_phase().unwrap();
         assert_eq!(
             timer.pomodoro_state.as_ref().unwrap().phase,
@@ -416,7 +392,6 @@ mod tests {
         );
         assert_eq!(timer.pomodoro_state.as_ref().unwrap().current_session, 1);
 
-        // Short break -> second work
         timer.next_phase().unwrap();
         assert_eq!(
             timer.pomodoro_state.as_ref().unwrap().phase,
@@ -424,14 +399,12 @@ mod tests {
         );
         assert_eq!(timer.pomodoro_state.as_ref().unwrap().current_session, 2);
 
-        // Second work -> long break
         timer.next_phase().unwrap();
         assert_eq!(
             timer.pomodoro_state.as_ref().unwrap().phase,
             PomodoroPhase::LongBreak
         );
 
-        // Long break -> reset to first work
         timer.next_phase().unwrap();
         assert_eq!(
             timer.pomodoro_state.as_ref().unwrap().phase,

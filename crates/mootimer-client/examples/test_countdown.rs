@@ -1,4 +1,3 @@
-// Test countdown timer
 use mootimer_client::MooTimerClient;
 
 #[tokio::main]
@@ -9,7 +8,6 @@ async fn main() -> anyhow::Result<()> {
     let result = client.timer_start_countdown("default", None, 1).await?;
     println!("✓ Started: {:?}", result);
 
-    // Wait a bit and check status
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     println!("\nChecking timer status after 2 seconds...");

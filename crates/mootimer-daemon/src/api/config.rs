@@ -1,4 +1,3 @@
-//! Config API methods
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -28,13 +27,11 @@ struct UpdateSyncParams {
     remote_url: Option<String>,
 }
 
-/// Get current configuration
 pub async fn get(manager: &Arc<ConfigManager>, _params: Option<Value>) -> Result<Value> {
     let config = manager.get().await;
     Ok(serde_json::to_value(&config)?)
 }
 
-/// Set default profile
 pub async fn set_default_profile(
     manager: &Arc<ConfigManager>,
     params: Option<Value>,
@@ -51,7 +48,6 @@ pub async fn set_default_profile(
     Ok(serde_json::to_value(&config)?)
 }
 
-/// Update pomodoro configuration
 pub async fn update_pomodoro(manager: &Arc<ConfigManager>, params: Option<Value>) -> Result<Value> {
     let params: UpdatePomodoroParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -71,7 +67,6 @@ pub async fn update_pomodoro(manager: &Arc<ConfigManager>, params: Option<Value>
     Ok(serde_json::to_value(&config)?)
 }
 
-/// Update sync configuration
 pub async fn update_sync(manager: &Arc<ConfigManager>, params: Option<Value>) -> Result<Value> {
     let params: UpdateSyncParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -85,7 +80,6 @@ pub async fn update_sync(manager: &Arc<ConfigManager>, params: Option<Value>) ->
     Ok(serde_json::to_value(&config)?)
 }
 
-/// Reset configuration to defaults
 pub async fn reset(manager: &Arc<ConfigManager>, _params: Option<Value>) -> Result<Value> {
     let config = manager
         .reset_to_default()

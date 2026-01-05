@@ -33,9 +33,10 @@ impl TimerEngine {
     pub fn new_manual(
         profile_id: String,
         task_id: Option<String>,
+        task_title: Option<String>,
         event_tx: broadcast::Sender<TimerEvent>,
     ) -> Self {
-        let timer = ActiveTimer::new_manual(profile_id, task_id);
+        let timer = ActiveTimer::new_manual(profile_id, task_id, task_title);
         Self {
             timer: Arc::new(RwLock::new(timer)),
             event_tx,
@@ -46,10 +47,11 @@ impl TimerEngine {
     pub fn new_pomodoro(
         profile_id: String,
         task_id: Option<String>,
+        task_title: Option<String>,
         config: PomodoroConfig,
         event_tx: broadcast::Sender<TimerEvent>,
     ) -> Self {
-        let timer = ActiveTimer::new_pomodoro(profile_id, task_id, config);
+        let timer = ActiveTimer::new_pomodoro(profile_id, task_id, task_title, config);
         Self {
             timer: Arc::new(RwLock::new(timer)),
             event_tx,
@@ -60,10 +62,11 @@ impl TimerEngine {
     pub fn new_countdown(
         profile_id: String,
         task_id: Option<String>,
+        task_title: Option<String>,
         duration_minutes: u64,
         event_tx: broadcast::Sender<TimerEvent>,
     ) -> Self {
-        let timer = ActiveTimer::new_countdown(profile_id, task_id, duration_minutes);
+        let timer = ActiveTimer::new_countdown(profile_id, task_id, task_title, duration_minutes);
         Self {
             timer: Arc::new(RwLock::new(timer)),
             event_tx,
@@ -240,6 +243,7 @@ impl TimerEngine {
 
         let entry = Entry::create_completed(
             timer.task_id.clone(),
+            timer.task_title.clone(),
             timer.start_time,
             Utc::now(),
             timer.mode,
@@ -277,11 +281,12 @@ mod tests {
     async fn test_manual_timer_creation() {
         let (tx, _rx) = broadcast::channel(100);
         let engine =
-            TimerEngine::new_manual("test_profile".to_string(), Some("task1".to_string()), tx);
+            TimerEngine::new_manual("test_profile".to_string(), Some("task1".to_string()), Some("Task Title".to_string()), tx);
 
         let timer = engine.get_timer().await;
         assert_eq!(timer.profile_id, "test_profile");
         assert_eq!(timer.task_id, Some("task1".to_string()));
+        assert_eq!(timer.task_title, Some("Task Title".to_string()));
         assert_eq!(timer.mode, TimerMode::Manual);
         assert!(timer.is_running());
     }
@@ -290,7 +295,7 @@ mod tests {
     async fn test_pomodoro_timer_creation() {
         let (tx, _rx) = broadcast::channel(100);
         let config = PomodoroConfig::default();
-        let engine = TimerEngine::new_pomodoro("test_profile".to_string(), None, config, tx);
+        let engine = TimerEngine::new_pomodoro("test_profile".to_string(), None, None, config, tx);
 
         let timer = engine.get_timer().await;
         assert_eq!(timer.mode, TimerMode::Pomodoro);
@@ -300,7 +305,7 @@ mod tests {
     #[tokio::test]
     async fn test_pause_resume() {
         let (tx, _rx) = broadcast::channel(100);
-        let engine = TimerEngine::new_manual("test".to_string(), None, tx);
+        let engine = TimerEngine::new_manual("test".to_string(), None, None, tx);
 
         engine.pause().await.unwrap();
         let timer = engine.get_timer().await;
@@ -314,12 +319,13 @@ mod tests {
     #[tokio::test]
     async fn test_stop_creates_entry() {
         let (tx, _rx) = broadcast::channel(100);
-        let engine = TimerEngine::new_manual("test".to_string(), Some("task1".to_string()), tx);
+        let engine = TimerEngine::new_manual("test".to_string(), Some("task1".to_string()), Some("Task Title".to_string()), tx);
 
         sleep(Duration::from_millis(1100)).await;
 
         let entry = engine.stop().await.unwrap();
         assert_eq!(entry.task_id, Some("task1".to_string()));
+        assert_eq!(entry.task_title, Some("Task Title".to_string()));
         assert!(entry.is_completed());
         assert!(entry.duration_seconds >= 1);
     }
@@ -327,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn test_timer_events() {
         let (tx, mut rx) = broadcast::channel(100);
-        let engine = TimerEngine::new_manual("test".to_string(), None, tx);
+        let engine = TimerEngine::new_manual("test".to_string(), None, None, tx);
 
         engine.pause().await.unwrap();
         let event = rx.recv().await.unwrap();
@@ -351,6 +357,7 @@ mod tests {
         let (tx, _) = broadcast::channel(100);
         let engine = Arc::new(TimerEngine::new_countdown(
             "test_profile".to_string(),
+            None,
             None,
             60,
             tx,

@@ -1,5 +1,3 @@
-//! Entry manager for time entry operations
-
 use chrono::{DateTime, Datelike, Utc};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,7 +12,6 @@ use mootimer_core::{
     storage::{EntryStorage, init_data_dir},
 };
 
-/// Entry manager error
 #[derive(Debug, thiserror::Error)]
 pub enum EntryManagerError {
     #[error("Entry not found: {0}")]
@@ -32,7 +29,6 @@ pub enum EntryManagerError {
 
 pub type Result<T> = std::result::Result<T, EntryManagerError>;
 
-/// Filter for querying entries
 #[derive(Debug, Clone)]
 pub struct EntryFilter {
     pub start_date: Option<DateTime<Utc>>,
@@ -41,7 +37,6 @@ pub struct EntryFilter {
     pub tags: Option<Vec<String>>,
 }
 
-/// Statistics for time entries
 #[derive(Debug, Clone)]
 pub struct EntryStats {
     pub total_entries: usize,
@@ -52,17 +47,13 @@ pub struct EntryStats {
     pub avg_duration_seconds: u64,
 }
 
-/// Manages time entries with caching and persistence
 pub struct EntryManager {
     data_dir: PathBuf,
-    /// Cache: profile_id -> Vec<Entry>
     cache: Arc<RwLock<HashMap<String, Vec<Entry>>>>,
-    /// Event manager for broadcasting events
     event_manager: Arc<EventManager>,
 }
 
 impl EntryManager {
-    /// Create a new entry manager
     pub fn new(event_manager: Arc<EventManager>) -> CoreResult<Self> {
         let data_dir = init_data_dir()?;
 
@@ -73,7 +64,6 @@ impl EntryManager {
         })
     }
 
-    /// Load all entries for a profile (blocking I/O wrapped in spawn_blocking)
     pub async fn load_profile(&self, profile_id: &str) -> Result<()> {
         let data_dir = self.data_dir.clone();
         let profile_id_owned = profile_id.to_string();
@@ -95,14 +85,11 @@ impl EntryManager {
         Ok(())
     }
 
-    /// Add a new entry for a profile
     pub async fn add(&self, profile_id: &str, entry: Entry) -> Result<Entry> {
-        // Validate entry
         entry
             .validate()
             .map_err(|e| EntryManagerError::Invalid(e.to_string()))?;
 
-        // Append to storage using spawn_blocking for blocking I/O
         let data_dir = self.data_dir.clone();
         let profile_id_owned = profile_id.to_string();
         let entry_clone = entry.clone();
@@ -114,7 +101,6 @@ impl EntryManager {
         .await
         .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
 
-        // Add to cache
         {
             let mut cache = self.cache.write().await;
             cache
@@ -123,16 +109,13 @@ impl EntryManager {
                 .push(entry.clone());
         }
 
-        // Emit entry added event
         let event = EntryEvent::added(profile_id.to_string(), entry.clone());
         self.event_manager.emit_entry(event);
 
         Ok(entry)
     }
 
-    /// Get all entries for a profile
     pub async fn get_all(&self, profile_id: &str) -> Result<Vec<Entry>> {
-        // Try cache first
         {
             let cache = self.cache.read().await;
             if let Some(entries) = cache.get(profile_id) {
@@ -140,22 +123,18 @@ impl EntryManager {
             }
         }
 
-        // Load from storage
         self.load_profile(profile_id).await?;
 
-        // Get from cache
         let cache = self.cache.read().await;
         Ok(cache.get(profile_id).cloned().unwrap_or_default())
     }
 
-    /// Get entries with filter
     pub async fn filter(&self, profile_id: &str, filter: EntryFilter) -> Result<Vec<Entry>> {
         let entries = self.get_all(profile_id).await?;
 
         Ok(entries
             .into_iter()
             .filter(|entry| {
-                // Filter by date range
                 if let Some(start) = filter.start_date
                     && entry.start_time < start
                 {
@@ -167,14 +146,12 @@ impl EntryManager {
                     return false;
                 }
 
-                // Filter by task
                 if let Some(ref task_id) = filter.task_id
                     && entry.task_id.as_ref() != Some(task_id)
                 {
                     return false;
                 }
 
-                // Filter by tags
                 if let Some(ref tags) = filter.tags
                     && !tags.iter().any(|tag| entry.has_tag(tag))
                 {
@@ -186,7 +163,6 @@ impl EntryManager {
             .collect())
     }
 
-    /// Get entries for today
     pub async fn get_today(&self, profile_id: &str) -> Result<Vec<Entry>> {
         let now = Utc::now();
         let start_of_day = now
@@ -207,7 +183,6 @@ impl EntryManager {
         .await
     }
 
-    /// Get entries for current week
     pub async fn get_week(&self, profile_id: &str) -> Result<Vec<Entry>> {
         let now = Utc::now();
         let days_from_monday = now.weekday().num_days_from_monday();
@@ -230,7 +205,6 @@ impl EntryManager {
         .await
     }
 
-    /// Get entries for current month
     pub async fn get_month(&self, profile_id: &str) -> Result<Vec<Entry>> {
         let now = Utc::now();
         let start_of_month = now
@@ -252,7 +226,6 @@ impl EntryManager {
         .await
     }
 
-    /// Calculate statistics for entries
     pub fn calculate_stats(entries: &[Entry]) -> EntryStats {
         let total_duration: u64 = entries.iter().map(|e| e.duration_seconds).sum();
         let pomodoro_count = entries
@@ -275,25 +248,21 @@ impl EntryManager {
         }
     }
 
-    /// Get statistics for today
     pub async fn get_today_stats(&self, profile_id: &str) -> Result<EntryStats> {
         let entries = self.get_today(profile_id).await?;
         Ok(Self::calculate_stats(&entries))
     }
 
-    /// Get statistics for current week
     pub async fn get_week_stats(&self, profile_id: &str) -> Result<EntryStats> {
         let entries = self.get_week(profile_id).await?;
         Ok(Self::calculate_stats(&entries))
     }
 
-    /// Get statistics for current month
     pub async fn get_month_stats(&self, profile_id: &str) -> Result<EntryStats> {
         let entries = self.get_month(profile_id).await?;
         Ok(Self::calculate_stats(&entries))
     }
 
-    /// Delete an entry
     pub async fn delete(&self, profile_id: &str, entry_id: &str) -> Result<()> {
         let mut entries = self.get_all(profile_id).await?;
 
@@ -304,7 +273,6 @@ impl EntryManager {
             return Err(EntryManagerError::NotFound(entry_id.to_string()));
         }
 
-        // Save to storage
         let data_dir = self.data_dir.clone();
         let profile_id_owned = profile_id.to_string();
         let entries_clone = entries.clone();
@@ -316,20 +284,17 @@ impl EntryManager {
         .await
         .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
 
-        // Update cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(profile_id.to_string(), entries);
         }
 
-        // Emit entry deleted event
         let event = EntryEvent::deleted(profile_id.to_string(), entry_id.to_string());
         self.event_manager.emit_entry(event);
 
         Ok(())
     }
 
-    /// Update an entry
     pub async fn update(&self, profile_id: &str, entry: Entry) -> Result<()> {
         let mut entries = self.get_all(profile_id).await?;
 
@@ -346,7 +311,6 @@ impl EntryManager {
             return Err(EntryManagerError::NotFound(entry.id));
         }
 
-        // Save to storage
         let data_dir = self.data_dir.clone();
         let profile_id_owned = profile_id.to_string();
         let entries_clone = entries.clone();
@@ -358,13 +322,11 @@ impl EntryManager {
         .await
         .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
 
-        // Update cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(profile_id.to_string(), entries);
         }
 
-        // Emit entry updated event
         let event = EntryEvent::updated(profile_id.to_string(), entry.clone());
         self.event_manager.emit_entry(event);
 
@@ -406,7 +368,7 @@ mod tests {
         let manager = create_manager(&temp_dir);
         let profile_id = "test_entry";
 
-        let entry = Entry::new(Some("task1".to_string()), TimerMode::Manual);
+        let entry = Entry::new(Some("task1".to_string()), Some("Task".to_string()), TimerMode::Manual);
         let added = manager.add(profile_id, entry).await.unwrap();
 
         assert!(added.is_active());
@@ -419,8 +381,8 @@ mod tests {
         let manager = create_manager(&temp_dir);
         let profile_id = "test_get_all";
 
-        let entry1 = Entry::new(None, TimerMode::Manual);
-        let entry2 = Entry::new(None, TimerMode::Pomodoro);
+        let entry1 = Entry::new(None, None, TimerMode::Manual);
+        let entry2 = Entry::new(None, None, TimerMode::Pomodoro);
 
         manager.add(profile_id, entry1).await.unwrap();
         manager.add(profile_id, entry2).await.unwrap();
@@ -436,8 +398,8 @@ mod tests {
         let manager = create_manager(&temp_dir);
         let profile_id = "test_filter";
 
-        let entry1 = Entry::new(Some("task1".to_string()), TimerMode::Manual);
-        let entry2 = Entry::new(Some("task2".to_string()), TimerMode::Manual);
+        let entry1 = Entry::new(Some("task1".to_string()), None, TimerMode::Manual);
+        let entry2 = Entry::new(Some("task2".to_string()), None, TimerMode::Manual);
 
         manager.add(profile_id, entry1).await.unwrap();
         manager.add(profile_id, entry2).await.unwrap();
@@ -466,9 +428,9 @@ mod tests {
         let end1 = start + Duration::hours(1);
         let end2 = start + Duration::hours(2);
 
-        let entry1 = Entry::create_completed(None, start, end1, TimerMode::Manual).unwrap();
+        let entry1 = Entry::create_completed(None, None, start, end1, TimerMode::Manual).unwrap();
 
-        let entry2 = Entry::create_completed(None, start, end2, TimerMode::Pomodoro).unwrap();
+        let entry2 = Entry::create_completed(None, None, start, end2, TimerMode::Pomodoro).unwrap();
 
         let stats = EntryManager::calculate_stats(&[entry1, entry2]);
 

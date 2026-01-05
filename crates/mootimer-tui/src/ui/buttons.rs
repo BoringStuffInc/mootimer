@@ -1,4 +1,3 @@
-//! Button rendering utilities
 
 use ratatui::{
     Frame,
@@ -48,7 +47,6 @@ pub fn render_button_row(f: &mut Frame, area: Rect, buttons: &[Button], spacing:
         return;
     }
 
-    // Calculate constraints for buttons with spacing
     let mut constraints = Vec::new();
     for i in 0..button_count {
         constraints.push(Constraint::Percentage(100 / button_count as u16));
@@ -65,6 +63,6 @@ pub fn render_button_row(f: &mut Frame, area: Rect, buttons: &[Button], spacing:
     let mut chunk_index = 0;
     for button in buttons {
         button.render(f, chunks[chunk_index]);
-        chunk_index += 2; // Skip spacing chunks
+        chunk_index += 2;
     }
 }

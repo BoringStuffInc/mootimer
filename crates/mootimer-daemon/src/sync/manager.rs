@@ -1,12 +1,9 @@
-//! Synchronization manager for git operations
-
 use std::sync::Arc;
 
 use mootimer_core::{
     Result as CoreResult, git::GitOperations, models::SyncConfig, storage::init_data_dir,
 };
 
-/// Sync manager error
 #[derive(Debug, thiserror::Error)]
 pub enum SyncManagerError {
     #[error("Storage error: {0}")]
@@ -24,7 +21,6 @@ pub enum SyncManagerError {
 
 pub type Result<T> = std::result::Result<T, SyncManagerError>;
 
-/// Manages git synchronization for time tracking data
 pub struct SyncManager {
     git_ops: Arc<GitOperations>,
 }
@@ -59,22 +55,18 @@ impl SyncManager {
         let message = message.to_string();
 
         tokio::task::spawn_blocking(move || {
-            // Check if repo is initialized
             if !git_ops.is_initialized() {
                 return Err(SyncManagerError::NotConfigured(
                     "Git repository not initialized".to_string(),
                 ));
             }
 
-            // Check if there are changes
             if !git_ops.has_changes()? {
                 return Ok(None);
             }
 
-            // Add all changes
             git_ops.add_all()?;
 
-            // Commit
             let commit_id = git_ops.commit(&message)?;
 
             Ok(Some(commit_id.to_string()))
@@ -91,34 +83,28 @@ impl SyncManager {
         let auto_push = config.auto_push;
 
         tokio::task::spawn_blocking(move || {
-            // Check if repo is initialized
             if !git_ops.is_initialized() {
                 return Err(SyncManagerError::NotConfigured(
                     "Git repository not initialized".to_string(),
                 ));
             }
 
-            // Get current branch
             let branch = git_ops.current_branch()?;
 
-            // Add/update remote
             git_ops.add_remote("origin", &remote_url)?;
 
             let mut pulled = false;
             let mut pushed = false;
 
-            // Pull changes if there are remote commits
             match git_ops.pull("origin", &branch) {
                 Ok(_) => {
                     pulled = true;
                 }
                 Err(e) => {
-                    // If pull fails, log but continue (might be first push)
                     tracing::warn!("Failed to pull: {}", e);
                 }
             }
 
-            // Push changes if auto_push is enabled and there are local commits
             if auto_push {
                 match git_ops.push("origin", &branch) {
                     Ok(_) => {
@@ -141,7 +127,6 @@ impl SyncManager {
         let remote_url = config.remote_url.clone();
 
         tokio::task::spawn_blocking(move || {
-            // Check if repo is initialized
             if !git_ops.is_initialized() {
                 return Ok(SyncStatus {
                     initialized: false,
@@ -185,7 +170,6 @@ impl SyncManager {
         let url = url.to_string();
 
         tokio::task::spawn_blocking(move || {
-            // Check if repo is initialized
             if !git_ops.is_initialized() {
                 return Err(SyncManagerError::NotConfigured(
                     "Git repository not initialized. Call init_repo() first.".to_string(),
@@ -200,14 +184,12 @@ impl SyncManager {
     }
 }
 
-/// Result of a sync operation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncResult {
     pub pulled: bool,
     pub pushed: bool,
 }
 
-/// Current sync status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncStatus {
     pub initialized: bool,
@@ -246,7 +228,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let home_path = temp_dir.path().to_str().unwrap().to_string();
 
-        // Use a scoped environment change
         unsafe {
             std::env::set_var("HOME", &home_path);
             std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
@@ -255,14 +236,11 @@ mod tests {
         let manager = SyncManager::new().unwrap();
         manager.init_repo().await.unwrap();
 
-        // Create a file
         let data_dir = init_data_dir().unwrap();
         std::fs::write(data_dir.join("test.txt"), "Hello").unwrap();
 
-        // Should commit now
         let result = manager.auto_commit("Test commit").await;
         assert!(result.is_ok(), "Auto-commit should succeed");
-        // Note: result might be None if config files were already committed
     }
 
     #[tokio::test]
@@ -276,15 +254,12 @@ mod tests {
 
         let manager = SyncManager::new().unwrap();
 
-        // Not initialized
         let config = SyncConfig::default();
         let status = manager.get_status(&config).await.unwrap();
         assert!(!status.initialized);
 
-        // Initialize
         manager.init_repo().await.unwrap();
         let status = manager.get_status(&config).await.unwrap();
         assert!(status.initialized);
-        // Note: has_changes might be true if config.json was created, which is expected
     }
 }

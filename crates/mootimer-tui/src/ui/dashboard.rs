@@ -1,8 +1,9 @@
 use crate::app::{App, DashboardPane};
+use crate::ui::big_text::BigText;
 use mootimer_core::models::{ActiveTimer, PomodoroPhase};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
@@ -17,8 +18,8 @@ pub fn draw_dashboard(f: &mut Frame, app: &mut App, area: Rect) {
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(17),
-            Constraint::Min(3),
+            Constraint::Fill(1),
+            Constraint::Length(9),
             Constraint::Length(7),
         ])
         .split(main_chunks[0]);
@@ -31,11 +32,7 @@ pub fn draw_dashboard(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
-    let title = if app.focused_pane == DashboardPane::TimerConfig {
-        "⏱  Timer ⟨ FOCUSED ⟩"
-    } else {
-        "⏱  Timer"
-    };
+    let title = " ⏱  Timer ".to_string();
 
     let border_style = if app.focused_pane == DashboardPane::TimerConfig {
         Style::default()
@@ -45,18 +42,43 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
+    let active_timer: Option<ActiveTimer> = app
+        .timer_info
+        .clone()
+        .and_then(|v| serde_json::from_value(v).ok());
+
+    let hint = if let Some(timer) = &active_timer {
+        match timer.state {
+            mootimer_core::models::TimerState::Running | mootimer_core::models::TimerState::Paused => 
+                " [Space]Pause/Resume [x]Stop [r]Refresh ",
+            _ => " [t]Type [Space/Enter]Start ",
+        }
+    } else {
+        match app.selected_timer_type {
+             crate::app::TimerType::Manual => " [t]Type [Space/Enter]Start ",
+             _ => " [t]Type [↑↓]Dur [Space/Enter]Start ",
+        }
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
+        .title_bottom(Line::from(hint).right_aligned())
         .border_style(border_style);
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    let active_timer: Option<ActiveTimer> = app
-        .timer_info
-        .clone()
-        .and_then(|v| serde_json::from_value(v).ok());
+    let pane_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .split(inner_area);
+
+    let main_area = pane_chunks[0];
+    let gauge_area = pane_chunks[1];
 
     let show_tomato = if let Some(timer) = &active_timer {
         timer.is_pomodoro() && (timer.is_running() || timer.is_paused())
@@ -71,28 +93,55 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
         false
     };
 
-    let show_animation = show_tomato || show_cow;
+    let show_manual = if let Some(timer) = &active_timer {
+        timer.mode == mootimer_core::models::TimerMode::Manual
+            && (timer.is_running() || timer.is_paused())
+    } else {
+        false
+    };
+
+    let show_animation = show_tomato || show_cow || show_manual;
 
     let content_chunks = if show_animation {
         Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(32)])
-            .split(inner_area)
+            .constraints([
+                Constraint::Fill(1),
+                Constraint::Length(32),
+                Constraint::Fill(1),
+            ])
+            .split(main_area)
     } else {
         Layout::default()
             .constraints([Constraint::Percentage(100)])
-            .split(inner_area)
+            .split(main_area)
     };
 
-    let info_area = content_chunks[0];
+    let info_area = if show_animation { content_chunks[0] } else { content_chunks[0] };
 
-    if show_animation && content_chunks.len() > 1 {
+    if show_animation && content_chunks.len() >= 3 {
+        let animation_area = content_chunks[1];
         if show_tomato {
             use crate::ui::tomato::Tomato;
-            f.render_stateful_widget(Tomato, content_chunks[1], &mut app.tomato_state);
+            f.render_stateful_widget(Tomato, animation_area, &mut app.tomato_state);
         } else if show_cow {
             use crate::ui::cow::Cow;
-            f.render_stateful_widget(Cow, content_chunks[1], &mut app.cow_state);
+            f.render_stateful_widget(Cow, animation_area, &mut app.cow_state);
+        } else if show_manual {
+             let elapsed = active_timer.as_ref().unwrap().current_elapsed();
+             let hours = elapsed / 3600;
+             let minutes = (elapsed % 3600) / 60;
+             let seconds = elapsed % 60;
+             let time_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+             
+             let text_width = 30; 
+             let text_height = 5;
+             
+             let x = animation_area.x + (animation_area.width.saturating_sub(text_width)) / 2;
+             let y = animation_area.y + (animation_area.height.saturating_sub(text_height)) / 2;
+             
+             let centered_area = Rect::new(x, y, text_width, text_height);
+             f.render_widget(BigText::new(&time_str).style(Style::default().fg(Color::Green)), centered_area);
         }
     }
 
@@ -171,10 +220,14 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             let seconds = elapsed % 60;
 
             (
-                format!(
-                    "    {} {:02}:{:02}:{:02}",
-                    state_icon, hours, minutes, seconds
-                ),
+                if show_manual {
+                    String::new()
+                } else {
+                    format!(
+                        "    {} {:02}:{:02}:{:02}",
+                        state_icon, hours, minutes, seconds
+                    )
+                },
                 "Elapsed (Work)",
                 None,
                 "Manual Timer".to_string(),
@@ -193,52 +246,47 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             })
             .unwrap_or("No task");
 
-        let state_str = match timer.state {
-            mootimer_core::models::TimerState::Running => "running",
-            mootimer_core::models::TimerState::Paused => "paused",
-            _ => "stopped",
+        let state_info = match timer.state {
+            mootimer_core::models::TimerState::Running => Span::styled(" RUNNING ", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
+            mootimer_core::models::TimerState::Paused => Span::styled(" PAUSED ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            _ => Span::styled(" STOPPED ", Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD)),
         };
 
-        let text_lines = vec![
+        let mut text_lines = vec![
+            Line::from(vec![
+                Span::styled("STATUS: ", Style::default().add_modifier(Modifier::DIM)),
+                state_info,
+            ]),
             Line::from(""),
-            Line::from(Span::styled(
-                time_display,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(format!("    Phase: {} | Status: {}", phase_info, state_str)),
-            Line::from(format!("    Task: {}", task_name)),
-            Line::from(""),
-            Line::from("    [Space]Pause/Resume  [x]Stop  [r]Refresh"),
+            Line::from(vec![
+                Span::styled("PHASE:  ", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(phase_info, Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("TASK:   ", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(task_name, Style::default().fg(Color::Cyan)),
+            ]),
         ];
 
-        let info_chunks = if percent.is_some() {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(8),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(info_area)
-        } else {
-            Layout::default()
-                .constraints([Constraint::Percentage(100)])
-                .split(info_area)
-        };
+        if !time_display.is_empty() {
+            text_lines.insert(0, Line::from(""));
+            text_lines.insert(0, Line::from(Span::styled(
+                time_display.trim(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )));
+        }
 
-        let text_widget = Paragraph::new(text_lines);
-        f.render_widget(text_widget, info_chunks[0]);
+        let text_widget = Paragraph::new(text_lines)
+            .block(Block::default().padding(ratatui::widgets::Padding::new(2, 2, 1, 1)));
+        f.render_widget(text_widget, info_area);
 
-        if let Some(ratio) = percent
-            && info_chunks.len() >= 2
-        {
+        if let Some(ratio) = percent {
             let gauge = Gauge::default()
-                .block(Block::default())
+                .block(Block::default().padding(ratatui::widgets::Padding::horizontal(2)))
                 .gauge_style(Style::default().fg(color).bg(Color::DarkGray))
                 .ratio(ratio)
                 .label(format!("{:.0}%", ratio * 100.0));
-            f.render_widget(gauge, info_chunks[1]);
+            f.render_widget(gauge, gauge_area);
         }
     } else {
         use crate::app::TimerType;
@@ -250,31 +298,28 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             .and_then(|v| v.as_str())
             .unwrap_or("No task");
 
-        let (timer_type_display, duration_text, config_hint) = match app.selected_timer_type {
-            TimerType::Manual => ("▶ Manual ▶", "Until stopped".to_string(), "[t]Change Type"),
+        let (timer_type_display, duration_text) = match app.selected_timer_type {
+            TimerType::Manual => ("Manual", "Until stopped".to_string()),
             TimerType::Pomodoro => (
-                "▶ Pomodoro ▶",
+                "Pomodoro",
                 format!("{}m work", app.pomodoro_minutes),
-                "[t]Type  [↑↓]Duration",
             ),
             TimerType::Countdown => (
-                "▶ Countdown ▶",
+                "Countdown",
                 format!("{}m", app.countdown_minutes),
-                "[t]Type  [↑↓]Duration",
             ),
         };
 
         let text_lines = vec![
-            Line::from(""),
             Line::from(Span::styled(
-                "    Ready to Start",
+                "Ready to Start",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
-                Span::raw("    Type: "),
+                Span::raw("Type: "),
                 Span::styled(
                     timer_type_display,
                     Style::default()
@@ -283,15 +328,14 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
                 ),
             ]),
             Line::from(vec![
-                Span::raw("    Duration: "),
+                Span::raw("Duration: "),
                 Span::styled(duration_text, Style::default().fg(Color::Green)),
             ]),
-            Line::from(format!("    Task: {}", selected_task)),
-            Line::from(""),
-            Line::from(format!("    {}  [Space/Enter]Start", config_hint)),
+            Line::from(format!("Task: {}", selected_task)),
         ];
 
-        let text_widget = Paragraph::new(text_lines);
+        let text_widget = Paragraph::new(text_lines)
+            .block(Block::default().padding(ratatui::widgets::Padding::new(2, 2, 1, 1)));
         f.render_widget(text_widget, info_area);
     }
 }
@@ -385,39 +429,24 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    let title = if app.focused_pane == DashboardPane::TasksList {
-        let base_title = if app.show_archived {
-            "ARCHIVED Tasks"
-        } else {
-            "Tasks"
-        };
-
-        if app.task_search.is_empty() {
-            format!(
-                "{} ({}) ⟨ FOCUSED ⟩ - [j/k]Nav [g/G]Jump [n]New [d]Del [/]Search",
-                base_title,
-                filtered_tasks.len()
-            )
-        } else {
-            format!(
-                "{} ({} matched '{}') ⟨ FOCUSED ⟩ - [/]Search",
-                base_title,
-                filtered_tasks.len(),
-                app.task_search
-            )
-        }
+    let base_title = if app.show_archived {
+        " ARCHIVED Tasks "
     } else {
-        let base_title = if app.show_archived {
-            "ARCHIVED Tasks"
-        } else {
-            "Tasks"
-        };
-        format!(
-            "{} ({}) - [Ctrl-w]Focus [j/k]Nav [n]New [d]Del",
-            base_title,
-            filtered_tasks.len()
-        )
+        " Tasks "
     };
+
+    let title = format!(" {} ({}) ", base_title, filtered_tasks.len());
+
+    let (action_hint, view_hint) = if app.show_archived {
+        ("[a]Restore", "[A]Active")
+    } else {
+        ("[a]Archive", "[A]Archived")
+    };
+
+    let bottom_hint = format!(
+        " [j/k]Nav [g/G]Jump [n]New [d]Del {} {} [/]Search ",
+        action_hint, view_hint
+    );
 
     let border_style = if app.focused_pane == DashboardPane::TasksList {
         Style::default()
@@ -427,12 +456,13 @@ fn draw_tasks_list(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
-    let tasks_list = List::new(task_items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .border_style(border_style),
-    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_bottom(Line::from(bottom_hint).right_aligned())
+        .border_style(border_style);
+
+    let tasks_list = List::new(task_items).block(block);
     f.render_widget(tasks_list, area);
 }
 
@@ -478,7 +508,7 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
     let (title, border_style) = if app.focused_pane == DashboardPane::ProfileList {
         (
             format!(
-                "👤 Profiles ({}) ⟨ FOCUSED ⟩ - [Enter]Switch [n]New [d]Del",
+                " 👤 Profiles ({}) ",
                 app.profiles.len()
             ),
             Style::default()
@@ -487,22 +517,23 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
         )
     } else {
         (
-            format!("👤 Profiles ({}) - [Ctrl-w]Focus", app.profiles.len()),
+            format!(" 👤 Profiles ({}) ", app.profiles.len()),
             Style::default().fg(Color::DarkGray),
         )
     };
 
-    let list = List::new(profile_items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .border_style(border_style),
-    );
+    let bottom_hint = " [Enter]Switch [n]New [d]Del [r]Rename ";
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_bottom(Line::from(bottom_hint).right_aligned())
+        .border_style(border_style);
 
     let mut state = ratatui::widgets::ListState::default();
     state.select(Some(app.selected_profile_index));
 
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_stateful_widget(List::new(profile_items).block(block), area, &mut state);
 }
 
 fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
@@ -523,10 +554,9 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
             .unwrap_or(0);
 
         vec![
-            Line::from(""),
             Line::from(vec![
                 Span::styled(
-                    format!("  ⏱ {}h {:02}m", hours, minutes),
+                    format!("⏱ {}h {:02}m", hours, minutes),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -542,17 +572,25 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(Color::Gray),
                 ),
             ]),
-            Line::from(""),
         ]
     } else {
-        vec![Line::from(""), Line::from("  No data for today")]
+        vec![Line::from("No data for today")]
     };
 
-    let stats_widget = Paragraph::new(stats_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("📊 Today")
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
-    f.render_widget(stats_widget, area);
+    let stats_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" 📊 Today ")
+        .border_style(Style::default().fg(Color::DarkGray));
+    
+    f.render_widget(block, area);
+    f.render_widget(Paragraph::new(stats_text).alignment(Alignment::Center), stats_chunks[1]);
 }

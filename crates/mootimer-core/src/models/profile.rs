@@ -1,4 +1,3 @@
-//! Profile data model
 
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
@@ -40,7 +39,6 @@ impl Profile {
             ));
         }
 
-        // Validate ID format (alphanumeric, underscore, hyphen only)
         if !self
             .id
             .chars()
@@ -52,7 +50,6 @@ impl Profile {
             ));
         }
 
-        // Validate color format if present (hex color)
         if let Some(ref color) = self.color
             && (!color.starts_with('#') || !(color.len() == 7 || color.len() == 4))
         {

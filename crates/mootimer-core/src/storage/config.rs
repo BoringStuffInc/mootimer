@@ -1,4 +1,3 @@
-//! Configuration storage operations
 
 use crate::{Result, models::Config};
 use std::path::PathBuf;
@@ -23,7 +22,6 @@ impl ConfigStorage {
 
         let content = std::fs::read_to_string(config_path)?;
 
-        // Handle empty file case
         if content.trim().is_empty() {
             let config = Config::default();
             self.save(&config)?;

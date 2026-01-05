@@ -1,4 +1,3 @@
-//! Error types for MooTimer Client
 
 use thiserror::Error;
 

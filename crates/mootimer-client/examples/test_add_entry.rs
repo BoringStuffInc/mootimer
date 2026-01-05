@@ -1,4 +1,3 @@
-// Test adding a new entry and verifying it persists
 use mootimer_client::MooTimerClient;
 
 #[tokio::main]

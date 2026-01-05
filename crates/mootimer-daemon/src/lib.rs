@@ -1,6 +1,3 @@
-//! MooTimer Daemon Library
-//!
-//! Core daemon functionality exposed as a library for testing.
 
 pub mod api;
 pub mod config;

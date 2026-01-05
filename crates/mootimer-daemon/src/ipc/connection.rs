@@ -1,4 +1,3 @@
-//! Client connection management
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::UnixStream;
@@ -6,7 +5,6 @@ use tokio::sync::mpsc;
 
 use super::protocol::{Notification, Request, Response};
 
-/// Connection error
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
     #[error("IO error: {0}")]
@@ -21,7 +19,6 @@ pub enum ConnectionError {
 
 pub type Result<T> = std::result::Result<T, ConnectionError>;
 
-/// Represents a client connection
 pub struct Connection {
     reader: BufReader<tokio::io::ReadHalf<UnixStream>>,
     writer: BufWriter<tokio::io::WriteHalf<UnixStream>>,
@@ -29,7 +26,6 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Create a new connection
     pub fn new(stream: UnixStream) -> (Self, mpsc::Sender<Notification>) {
         let (notif_tx, notif_rx) = mpsc::channel(100);
         let (read_half, write_half) = tokio::io::split(stream);
@@ -44,7 +40,6 @@ impl Connection {
         )
     }
 
-    /// Read a request from the client
     pub async fn read_request(&mut self) -> Result<Request> {
         let mut line = String::new();
         let bytes_read = self.reader.read_line(&mut line).await?;
@@ -57,7 +52,6 @@ impl Connection {
         Ok(request)
     }
 
-    /// Write a response to the client
     pub async fn write_response(&mut self, response: &Response) -> Result<()> {
         let json = serde_json::to_string(response)?;
 
@@ -68,7 +62,6 @@ impl Connection {
         Ok(())
     }
 
-    /// Write a notification to the client
     pub async fn write_notification(&mut self, notification: &Notification) -> Result<()> {
         let json = serde_json::to_string(notification)?;
 
@@ -79,7 +72,6 @@ impl Connection {
         Ok(())
     }
 
-    /// Start the notification forwarding loop
     pub async fn start_notification_loop(mut self) -> Result<()> {
         while let Some(notification) = self.notification_rx.recv().await {
             if let Err(e) = self.write_notification(&notification).await {
@@ -111,6 +103,5 @@ mod tests {
         let (stream, _) = listener.accept().await.unwrap();
         let (_conn, _tx) = Connection::new(stream);
 
-        // Connection created successfully
     }
 }

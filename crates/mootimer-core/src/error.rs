@@ -1,4 +1,3 @@
-//! Error types for MooTimer Core
 
 use std::io;
 use thiserror::Error;

@@ -1,4 +1,3 @@
-//! Application configuration
 
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -25,11 +24,11 @@ pub struct PomodoroConfig {
     pub long_break: u64,
     pub sessions_until_long_break: u32,
     #[serde(default = "default_countdown")]
-    pub countdown_default: u64, // Default countdown duration in seconds
+    pub countdown_default: u64,
 }
 
 fn default_countdown() -> u64 {
-    1800 // 30 minutes
+    1800
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -114,8 +113,7 @@ impl PomodoroConfig {
             ));
         }
 
-        // Reasonable upper limits
-        const MAX_DURATION: u64 = 7200; // 2 hours
+        const MAX_DURATION: u64 = 7200;
         if self.work_duration > MAX_DURATION {
             return Err(Error::Validation(format!(
                 "Work duration too long (max {} seconds)",
@@ -156,11 +154,11 @@ impl PomodoroConfig {
 impl Default for PomodoroConfig {
     fn default() -> Self {
         Self {
-            work_duration: 1500, // 25 minutes
-            short_break: 300,    // 5 minutes
-            long_break: 900,     // 15 minutes
+            work_duration: 1500,
+            short_break: 300,
+            long_break: 900,
             sessions_until_long_break: 4,
-            countdown_default: 1800, // 30 minutes
+            countdown_default: 1800,
         }
     }
 }
@@ -235,7 +233,7 @@ mod tests {
         };
         assert!(config.validate().is_err());
 
-        config.work_duration = 10000; // Too long
+        config.work_duration = 10000;
         assert!(config.validate().is_err());
     }
 

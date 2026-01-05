@@ -1,5 +1,3 @@
-//! Task manager for CRUD operations
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -9,10 +7,10 @@ use crate::events::TaskEvent;
 use mootimer_core::{
     Result as CoreResult,
     models::Task,
-    storage::{TaskStorage, init_data_dir},
+    storage::TaskStorage,
+    storage::init_data_dir,
 };
 
-/// Task manager error
 #[derive(Debug, thiserror::Error)]
 pub enum TaskManagerError {
     #[error("Task not found: {0}")]
@@ -27,12 +25,9 @@ pub enum TaskManagerError {
 
 pub type Result<T> = std::result::Result<T, TaskManagerError>;
 
-/// Manages tasks with caching and persistence (per profile)
 pub struct TaskManager {
     storage: TaskStorage,
-    /// Cache: profile_id -> task_id -> Task
     cache: Arc<RwLock<HashMap<String, HashMap<String, Task>>>>,
-    /// Event manager for broadcasting events
     event_manager: Arc<EventManager>,
 }
 
@@ -63,19 +58,15 @@ impl TaskManager {
     }
 
     pub async fn create(&self, profile_id: &str, task: Task) -> Result<Task> {
-        // Validate task
         task.validate()
             .map_err(|e| TaskManagerError::Invalid(e.to_string()))?;
 
-        // Get all tasks for profile (loads from storage if not cached)
         let tasks = self.get_all(profile_id).await?;
         let mut task_list: Vec<Task> = tasks.values().cloned().collect();
         task_list.push(task.clone());
 
-        // Save to storage
         self.storage.save(profile_id, &task_list)?;
 
-        // Add to cache
         {
             let mut cache = self.cache.write().await;
             if let Some(profile_tasks) = cache.get_mut(profile_id) {
@@ -83,7 +74,6 @@ impl TaskManager {
             }
         }
 
-        // Emit task created event
         let event = TaskEvent::created(profile_id.to_string(), task.clone());
         self.event_manager.emit_task(event);
 
@@ -91,7 +81,6 @@ impl TaskManager {
     }
 
     pub async fn get(&self, profile_id: &str, task_id: &str) -> Result<Task> {
-        // Try cache first
         {
             let cache = self.cache.read().await;
             if let Some(profile_tasks) = cache.get(profile_id)
@@ -101,10 +90,8 @@ impl TaskManager {
             }
         }
 
-        // Load from storage
         self.load_profile(profile_id).await?;
 
-        // Try cache again
         {
             let cache = self.cache.read().await;
             if let Some(profile_tasks) = cache.get(profile_id)
@@ -118,7 +105,6 @@ impl TaskManager {
     }
 
     pub async fn get_all(&self, profile_id: &str) -> Result<HashMap<String, Task>> {
-        // Try cache first
         {
             let cache = self.cache.read().await;
             if let Some(profile_tasks) = cache.get(profile_id) {
@@ -126,10 +112,8 @@ impl TaskManager {
             }
         }
 
-        // Load from storage
         self.load_profile(profile_id).await?;
 
-        // Get from cache
         let cache = self.cache.read().await;
         Ok(cache.get(profile_id).cloned().unwrap_or_default())
     }
@@ -140,29 +124,22 @@ impl TaskManager {
     }
 
     pub async fn update(&self, profile_id: &str, mut task: Task) -> Result<Task> {
-        // Validate task
         task.validate()
             .map_err(|e| TaskManagerError::Invalid(e.to_string()))?;
 
-        // Update timestamp
         task.touch();
 
-        // Get all tasks
         let mut tasks = self.get_all(profile_id).await?;
 
-        // Check if exists
         if !tasks.contains_key(&task.id) {
             return Err(TaskManagerError::NotFound(task.id.clone()));
         }
 
-        // Update in list
         tasks.insert(task.id.clone(), task.clone());
         let task_list: Vec<Task> = tasks.values().cloned().collect();
 
-        // Save to storage
         self.storage.save(profile_id, &task_list)?;
 
-        // Update cache
         {
             let mut cache = self.cache.write().await;
             if let Some(profile_tasks) = cache.get_mut(profile_id) {
@@ -170,7 +147,6 @@ impl TaskManager {
             }
         }
 
-        // Emit task updated event
         let event = TaskEvent::updated(profile_id.to_string(), task.clone());
         self.event_manager.emit_task(event);
 
@@ -178,22 +154,17 @@ impl TaskManager {
     }
 
     pub async fn delete(&self, profile_id: &str, task_id: &str) -> Result<()> {
-        // Get all tasks
         let mut tasks = self.get_all(profile_id).await?;
 
-        // Check if exists
         if !tasks.contains_key(task_id) {
             return Err(TaskManagerError::NotFound(task_id.to_string()));
         }
 
-        // Remove from list
         tasks.remove(task_id);
         let task_list: Vec<Task> = tasks.values().cloned().collect();
 
-        // Save to storage
         self.storage.save(profile_id, &task_list)?;
 
-        // Remove from cache
         {
             let mut cache = self.cache.write().await;
             if let Some(profile_tasks) = cache.get_mut(profile_id) {
@@ -201,7 +172,6 @@ impl TaskManager {
             }
         }
 
-        // Emit task deleted event
         let event = TaskEvent::deleted(profile_id.to_string(), task_id.to_string());
         self.event_manager.emit_task(event);
 

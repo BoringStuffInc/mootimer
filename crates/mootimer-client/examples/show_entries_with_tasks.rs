@@ -1,4 +1,3 @@
-// Test to show entries with task names resolved
 use mootimer_client::MooTimerClient;
 
 #[tokio::main]
