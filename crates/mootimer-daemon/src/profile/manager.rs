@@ -197,21 +197,30 @@ mod tests {
     use super::*;
     use crate::event_manager::EventManager;
     use mootimer_core::models::Profile;
+    use serial_test::serial;
     use std::sync::Arc;
+    use tempfile::TempDir;
     use uuid::Uuid;
 
     fn unique_id(prefix: &str) -> String {
         format!("{}_{}", prefix, Uuid::new_v4())
     }
 
-    fn create_manager() -> ProfileManager {
+    fn create_manager(_temp_dir: &TempDir) -> ProfileManager {
         let event_manager = Arc::new(EventManager::new());
+        unsafe {
+            std::env::set_var("HOME", _temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", _temp_dir.path().join("data"));
+            std::env::set_var("XDG_CONFIG_HOME", _temp_dir.path().join("config"));
+        }
         ProfileManager::new(event_manager).unwrap()
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_create_profile() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         manager.load_all().await.unwrap();
 
         let id = unique_id("test_profile");
@@ -223,8 +232,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_get_profile() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         manager.load_all().await.unwrap();
 
         let id = unique_id("test_get");
@@ -236,8 +247,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_list_profiles() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         manager.load_all().await.unwrap();
 
         let id1 = unique_id("test_list1");
@@ -253,8 +266,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_update_profile() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         manager.load_all().await.unwrap();
 
         let id = unique_id("test_update");
@@ -268,8 +283,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_delete_profile() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         manager.load_all().await.unwrap();
 
         let id = unique_id("test_delete");
@@ -283,8 +300,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_duplicate_profile() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         manager.load_all().await.unwrap();
 
         let id = unique_id("test_dup");

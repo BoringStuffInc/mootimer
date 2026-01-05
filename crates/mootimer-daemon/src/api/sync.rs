@@ -99,13 +99,17 @@ pub async fn set_remote(sync_manager: &Arc<SyncManager>, params: Option<Value>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[tokio::test]
+    #[serial]
     async fn test_init() {
         use tempfile::TempDir;
         let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        unsafe {
+            std::env::set_var("HOME", temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        }
 
         let manager = Arc::new(SyncManager::new().unwrap());
         let result = init(&manager, None).await.unwrap();
@@ -114,14 +118,17 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_commit() {
         use mootimer_core::storage::init_data_dir;
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
-        std::env::set_var("XDG_CONFIG_HOME", temp_dir.path().join("config"));
+        unsafe {
+            std::env::set_var("HOME", temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+            std::env::set_var("XDG_CONFIG_HOME", temp_dir.path().join("config"));
+        }
 
         let manager = Arc::new(SyncManager::new().unwrap());
         manager.init_repo().await.unwrap();

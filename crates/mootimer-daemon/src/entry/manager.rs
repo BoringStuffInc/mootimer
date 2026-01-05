@@ -385,16 +385,25 @@ mod tests {
     use crate::event_manager::EventManager;
     use chrono::Duration;
     use mootimer_core::models::{Entry, TimerMode};
+    use serial_test::serial;
     use std::sync::Arc;
+    use tempfile::TempDir;
 
-    fn create_manager() -> EntryManager {
+    fn create_manager(_temp_dir: &TempDir) -> EntryManager {
         let event_manager = Arc::new(EventManager::new());
+        unsafe {
+            std::env::set_var("HOME", _temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", _temp_dir.path().join("data"));
+            std::env::set_var("XDG_CONFIG_HOME", _temp_dir.path().join("config"));
+        }
         EntryManager::new(event_manager).unwrap()
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_add_entry() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let profile_id = "test_entry";
 
         let entry = Entry::new(Some("task1".to_string()), TimerMode::Manual);
@@ -404,8 +413,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_get_all_entries() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let profile_id = "test_get_all";
 
         let entry1 = Entry::new(None, TimerMode::Manual);
@@ -419,8 +430,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_filter_by_task() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let profile_id = "test_filter";
 
         let entry1 = Entry::new(Some("task1".to_string()), TimerMode::Manual);
@@ -447,6 +460,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_calculate_stats() {
         let start = Utc::now();
         let end1 = start + Duration::hours(1);

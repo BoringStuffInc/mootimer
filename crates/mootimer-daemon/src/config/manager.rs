@@ -158,17 +158,31 @@ impl Default for ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+    use tempfile::TempDir;
+
+    fn create_manager(_temp_dir: &TempDir) -> ConfigManager {
+        unsafe {
+            std::env::set_var("HOME", _temp_dir.path());
+            std::env::set_var("XDG_CONFIG_HOME", _temp_dir.path().join("config"));
+        }
+        ConfigManager::new().unwrap()
+    }
 
     #[tokio::test]
+    #[serial]
     async fn test_get_config() {
-        let manager = ConfigManager::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let config = manager.get().await;
         assert_eq!(config.version, "1.0.0");
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_set_default_profile() {
-        let manager = ConfigManager::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
 
         let updated = manager
             .set_default_profile(Some("work".to_string()))
@@ -178,8 +192,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_update_pomodoro_config() {
-        let manager = ConfigManager::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
 
         let updated = manager
             .update_pomodoro_config(
@@ -196,8 +212,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_update_sync_config() {
-        let manager = ConfigManager::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
 
         let updated = manager
             .update_sync_config(

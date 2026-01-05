@@ -77,14 +77,17 @@ fn send_os_notification(title: &str, body: &str) {
 
 /// Send an OS notification with urgency
 fn send_urgent_notification(title: &str, body: &str) {
-    if let Err(e) = notify_rust::Notification::new()
+    let mut notification = notify_rust::Notification::new();
+    notification
         .summary(title)
         .body(body)
         .icon("alarm-clock")
-        .urgency(notify_rust::Urgency::Critical)
-        .timeout(notify_rust::Timeout::Milliseconds(10000))
-        .show()
-    {
+        .timeout(notify_rust::Timeout::Milliseconds(10000));
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    notification.urgency(notify_rust::Urgency::Critical);
+
+    if let Err(e) = notification.show() {
         tracing::error!("Failed to send urgent notification: {}", e);
     }
 }

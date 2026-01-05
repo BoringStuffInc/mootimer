@@ -16,23 +16,23 @@ async fn main() -> anyhow::Result<()> {
     let timer = client.timer_get("default").await?;
     println!("Timer state: {:#?}", timer);
 
-    if let Some(mode) = timer.get("mode").and_then(|v| v.as_str()) {
-        if mode == "countdown" {
-            println!("✓ Mode is countdown!");
+    if let Some(mode) = timer.get("mode").and_then(|v| v.as_str())
+        && mode == "countdown"
+    {
+        println!("✓ Mode is countdown!");
 
-            let elapsed = timer
-                .get("elapsed_seconds")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let target = timer
-                .get("target_duration")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let remaining = target.saturating_sub(elapsed);
-            println!("  Elapsed: {}s", elapsed);
-            println!("  Target: {}s ({}m)", target, target / 60);
-            println!("  Remaining: {}s", remaining);
-        }
+        let elapsed = timer
+            .get("elapsed_seconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let target = timer
+            .get("target_duration")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let remaining = target.saturating_sub(elapsed);
+        println!("  Elapsed: {}s", elapsed);
+        println!("  Target: {}s ({}m)", target, target / 60);
+        println!("  Remaining: {}s", remaining);
     }
 
     println!("\nLet the timer run to completion (58s)...");

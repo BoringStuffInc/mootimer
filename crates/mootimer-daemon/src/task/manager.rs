@@ -241,18 +241,27 @@ mod tests {
     use super::*;
     use crate::event_manager::EventManager;
     use mootimer_core::models::Task;
+    use serial_test::serial;
     use std::sync::Arc;
+    use tempfile::TempDir;
 
     const TEST_PROFILE: &str = "test_profile";
 
-    fn create_manager() -> TaskManager {
+    fn create_manager(_temp_dir: &TempDir) -> TaskManager {
         let event_manager = Arc::new(EventManager::new());
+        unsafe {
+            std::env::set_var("HOME", _temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", _temp_dir.path().join("data"));
+            std::env::set_var("XDG_CONFIG_HOME", _temp_dir.path().join("config"));
+        }
         TaskManager::new(event_manager).unwrap()
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_create_task() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let task = Task::new("Test Task".to_string()).unwrap();
         let created_task = manager.create(TEST_PROFILE, task).await.unwrap();
 
@@ -260,8 +269,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_get_task() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let task = Task::new("Test Get".to_string()).unwrap();
         let created_task = manager.create(TEST_PROFILE, task).await.unwrap();
 
@@ -270,8 +281,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_list_tasks() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let task1 = Task::new("Task 1".to_string()).unwrap();
         let task2 = Task::new("Task 2".to_string()).unwrap();
         manager.create(TEST_PROFILE, task1).await.unwrap();
@@ -282,8 +295,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_update_task() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let mut task = Task::new("Old Title".to_string()).unwrap();
         task = manager.create(TEST_PROFILE, task).await.unwrap();
 
@@ -294,8 +309,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_delete_task() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let task = Task::new("Delete Me".to_string()).unwrap();
         let created_task = manager.create(TEST_PROFILE, task).await.unwrap();
 
@@ -309,8 +326,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_search_tasks() {
-        let manager = create_manager();
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
         let task1 = Task::new("My First Task".to_string()).unwrap();
         let task2 = Task::new("Another Task".to_string()).unwrap();
         manager.create(TEST_PROFILE, task1).await.unwrap();

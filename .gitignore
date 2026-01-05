@@ -20,3 +20,17 @@ Thumbs.db
 
 # Logs
 *.log
+
+.gemini/
+gha-creds-*.json
+
+# Temporary and metadata files
+.opencode/
+.scripts/
+.mcp.json
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+clippy_errors.txt
+.github/commands/
+.github/workflows/gemini-*

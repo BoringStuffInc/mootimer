@@ -91,7 +91,7 @@ impl MooTimerClient {
         let writer = Arc::new(Mutex::new(BufWriter::new(write_half)));
 
         let (notif_tx, notif_rx) = mpsc::channel::<Notification>(100);
-        let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> = 
+        let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
         let pending_clone = pending_responses.clone();

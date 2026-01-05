@@ -470,7 +470,7 @@ mod tests {
         let mut rx = manager.subscribe();
 
         // Start a 1-second countdown
-        let start_time = chrono::Utc::now();
+        let _start_time = chrono::Utc::now();
         manager
             .start_countdown("profile1".to_string(), None, 1)
             .await
@@ -483,20 +483,18 @@ mod tests {
 
         while start.elapsed() < Duration::from_secs(70) {
             // 1 minute countdown + buffer
-            match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
-                Ok(Ok(event)) => {
-                    tracing::debug!("Received event: {:?}", event.event_type);
-                    match event.event_type {
-                        super::super::events::TimerEventType::CountdownCompleted => {
-                            countdown_completed = true;
-                        }
-                        super::super::events::TimerEventType::Stopped { .. } => {
-                            timer_stopped = true;
-                        }
-                        _ => {}
+            if let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
+            {
+                tracing::debug!("Received event: {:?}", event.event_type);
+                match event.event_type {
+                    super::super::events::TimerEventType::CountdownCompleted => {
+                        countdown_completed = true;
                     }
+                    super::super::events::TimerEventType::Stopped { .. } => {
+                        timer_stopped = true;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
 
             if countdown_completed && timer_stopped {
@@ -516,7 +514,7 @@ mod tests {
         } else {
             // If we didn't see the events, at least verify get_timer works without deadlocking
             match result {
-                Ok(timer) => tracing::debug!(
+                Ok(_timer) => tracing::debug!(
                     "Timer still active after {} seconds",
                     start.elapsed().as_secs()
                 ),

@@ -221,13 +221,17 @@ pub struct SyncStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
 
     #[tokio::test]
+    #[serial]
     async fn test_init_repo() {
         let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        unsafe {
+            std::env::set_var("HOME", temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        }
 
         let manager = SyncManager::new().unwrap();
         assert!(!manager.is_initialized().await);
@@ -237,13 +241,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_auto_commit() {
         let temp_dir = TempDir::new().unwrap();
         let home_path = temp_dir.path().to_str().unwrap().to_string();
 
         // Use a scoped environment change
-        std::env::set_var("HOME", &home_path);
-        std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        unsafe {
+            std::env::set_var("HOME", &home_path);
+            std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        }
 
         let manager = SyncManager::new().unwrap();
         manager.init_repo().await.unwrap();
@@ -259,10 +266,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_get_status() {
         let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        unsafe {
+            std::env::set_var("HOME", temp_dir.path());
+            std::env::set_var("XDG_DATA_HOME", temp_dir.path().join("data"));
+        }
 
         let manager = SyncManager::new().unwrap();
 
