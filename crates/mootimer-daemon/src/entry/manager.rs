@@ -368,7 +368,11 @@ mod tests {
         let manager = create_manager(&temp_dir);
         let profile_id = "test_entry";
 
-        let entry = Entry::new(Some("task1".to_string()), Some("Task".to_string()), TimerMode::Manual);
+        let entry = Entry::new(
+            Some("task1".to_string()),
+            Some("Task".to_string()),
+            TimerMode::Manual,
+        );
         let added = manager.add(profile_id, entry).await.unwrap();
 
         assert!(added.is_active());

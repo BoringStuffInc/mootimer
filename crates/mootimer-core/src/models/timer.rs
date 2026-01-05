@@ -45,7 +45,11 @@ pub enum PomodoroPhase {
 }
 
 impl ActiveTimer {
-    pub fn new_manual(profile_id: String, task_id: Option<String>, task_title: Option<String>) -> Self {
+    pub fn new_manual(
+        profile_id: String,
+        task_id: Option<String>,
+        task_title: Option<String>,
+    ) -> Self {
         Self {
             profile_id,
             task_id,
@@ -161,25 +165,23 @@ impl ActiveTimer {
 
                 total
             }
-            _ => {
-                match self.state {
-                    TimerState::Running => Utc::now()
-                        .signed_duration_since(self.start_time)
-                        .num_seconds()
-                        .max(0) as u64,
-                    TimerState::Paused => {
-                        if let Some(pause_time) = self.pause_time {
-                            pause_time
-                                .signed_duration_since(self.start_time)
-                                .num_seconds()
-                                .max(0) as u64
-                        } else {
-                            self.elapsed_seconds
-                        }
+            _ => match self.state {
+                TimerState::Running => Utc::now()
+                    .signed_duration_since(self.start_time)
+                    .num_seconds()
+                    .max(0) as u64,
+                TimerState::Paused => {
+                    if let Some(pause_time) = self.pause_time {
+                        pause_time
+                            .signed_duration_since(self.start_time)
+                            .num_seconds()
+                            .max(0) as u64
+                    } else {
+                        self.elapsed_seconds
                     }
-                    TimerState::Stopped => self.elapsed_seconds,
                 }
-            }
+                TimerState::Stopped => self.elapsed_seconds,
+            },
         }
     }
 
@@ -238,9 +240,7 @@ impl ActiveTimer {
                 }
             }
             PomodoroPhase::ShortBreak => (PomodoroPhase::Work, pomo.current_session + 1),
-            PomodoroPhase::LongBreak => {
-                (PomodoroPhase::Work, 1)
-            }
+            PomodoroPhase::LongBreak => (PomodoroPhase::Work, 1),
         };
 
         pomo.phase = next_phase;
@@ -383,7 +383,7 @@ mod tests {
             countdown_default: 0,
         };
 
-        let mut timer = ActiveTimer::new_pomodoro("test".to_string(), None, config);
+        let mut timer = ActiveTimer::new_pomodoro("test".to_string(), None, None, config);
 
         timer.next_phase().unwrap();
         assert_eq!(

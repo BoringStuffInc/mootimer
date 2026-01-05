@@ -18,11 +18,14 @@ struct NewEntry {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = "test_mixed.csv";
-    
+
     {
         let mut wtr = csv::Writer::from_path(path)?;
-        wtr.write_record(&["id", "task_id"])?;
-        wtr.serialize(OldEntry { id: "1".into(), task_id: "t1".into() })?;
+        wtr.write_record(["id", "task_id"])?;
+        wtr.serialize(OldEntry {
+            id: "1".into(),
+            task_id: "t1".into(),
+        })?;
         wtr.flush()?;
     }
 

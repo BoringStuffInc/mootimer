@@ -1,4 +1,3 @@
-
 use tokio::sync::broadcast;
 
 use crate::events::{DaemonEvent, EntryEvent, ProfileEvent, TaskEvent};

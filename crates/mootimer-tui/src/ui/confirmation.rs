@@ -97,19 +97,22 @@ pub fn draw_break_finished_modal(f: &mut Frame) {
 
     let text = vec![
         Line::from(""),
-        Line::from(Span::styled("☕ Break is over! Ready to get back to work?", Style::default().fg(Color::White))),
+        Line::from(Span::styled(
+            "☕ Break is over! Ready to get back to work?",
+            Style::default().fg(Color::White),
+        )),
         Line::from(""),
         Line::from(vec![
             Span::styled(
                 "  [Enter/Space] Start Work  ",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("    "),
             Span::styled(
                 "  [x] Stop Timer  ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
@@ -118,7 +121,9 @@ pub fn draw_break_finished_modal(f: &mut Frame) {
         .borders(Borders::ALL)
         .title(Span::styled(
             " ☕ Break Finished ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ))
         .border_style(Style::default().fg(Color::Cyan));
 

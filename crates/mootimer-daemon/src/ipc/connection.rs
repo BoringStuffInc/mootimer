@@ -1,4 +1,3 @@
-
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
@@ -102,6 +101,5 @@ mod tests {
 
         let (stream, _) = listener.accept().await.unwrap();
         let (_conn, _tx) = Connection::new(stream);
-
     }
 }

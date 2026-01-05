@@ -5,7 +5,7 @@ use anyhow::Result;
 use app::{App, AppView, InputMode};
 use clap::Parser;
 use crossterm::{
-    event::{ 
+    event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
     execute,
@@ -381,10 +381,8 @@ async fn handle_mouse_event(
 
                 current_x += width;
             }
-        } else {
-            if app.current_view == AppView::Kanban {
-                handle_kanban_mouse(app, mouse, term_size).await?;
-            }
+        } else if app.current_view == AppView::Kanban {
+            handle_kanban_mouse(app, mouse, term_size).await?;
         }
     }
     Ok(())
@@ -457,7 +455,10 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
 
     if app.input_mode != InputMode::Normal {
         match code {
-            KeyCode::Tab | KeyCode::Down | KeyCode::Up if app.input_mode == InputMode::NewTask || app.input_mode == InputMode::EditTask => {
+            KeyCode::Tab | KeyCode::Down | KeyCode::Up
+                if app.input_mode == InputMode::NewTask
+                    || app.input_mode == InputMode::EditTask =>
+            {
                 app.focused_input_field = if app.focused_input_field == 0 { 1 } else { 0 };
             }
             KeyCode::Enter => {
@@ -643,144 +644,136 @@ async fn handle_dashboard_keys(
     };
 
     match app.focused_pane {
-        DashboardPane::TimerConfig => {
-            match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if app.timer_info.is_none() {
-                        app.adjust_timer_duration_up();
-                    }
+        DashboardPane::TimerConfig => match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if app.timer_info.is_none() {
+                    app.adjust_timer_duration_up();
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if app.timer_info.is_none() {
-                        app.adjust_timer_duration_down();
-                    }
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    if let Some(timer) = &app.timer_info
-                        && let Some(state) = timer.get("state").and_then(|v| v.as_str())
-                        && (state == "running" || state == "paused")
-                    {
-                        app.toggle_pause().await?;
-                        return Ok(());
-                    }
-                    app.start_selected_timer().await?;
-                }
-                KeyCode::Char('x') => {
-                    app.stop_timer().await?;
-                }
-                KeyCode::Char('r') => {
-                    app.status_message = "Refreshing...".to_string();
-                    app.refresh_all().await?;
-                    app.status_message = "Refreshed!".to_string();
-                }
-                _ => {}
             }
-        }
-        DashboardPane::TasksList => {
-            match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if is_timer_active {
-                        app.status_message =
-                            "Cannot change task while timer is running!".to_string();
-                        print!("\x07");
-                    } else {
-                        app.list_previous();
-                    }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.timer_info.is_none() {
+                    app.adjust_timer_duration_down();
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if is_timer_active {
-                        app.status_message =
-                            "Cannot change task while timer is running!".to_string();
-                        print!("\x07");
-                    } else {
-                        app.list_next();
-                    }
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if let Some(timer) = &app.timer_info
+                    && let Some(state) = timer.get("state").and_then(|v| v.as_str())
+                    && (state == "running" || state == "paused")
+                {
+                    app.toggle_pause().await?;
+                    return Ok(());
                 }
-                KeyCode::Char('g') => {
-                    if is_timer_active {
-                        app.status_message =
-                            "Cannot change task while timer is running!".to_string();
-                        print!("\x07");
-                    } else {
-                        app.selected_task_index = 0;
-                    }
+                app.start_selected_timer().await?;
+            }
+            KeyCode::Char('x') => {
+                app.stop_timer().await?;
+            }
+            KeyCode::Char('r') => {
+                app.status_message = "Refreshing...".to_string();
+                app.refresh_all().await?;
+                app.status_message = "Refreshed!".to_string();
+            }
+            _ => {}
+        },
+        DashboardPane::TasksList => match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if is_timer_active {
+                    app.status_message = "Cannot change task while timer is running!".to_string();
+                    print!("\x07");
+                } else {
+                    app.list_previous();
                 }
-                KeyCode::Char('G') => {
-                    if is_timer_active {
-                        app.status_message =
-                            "Cannot change task while timer is running!".to_string();
-                        print!("\x07");
-                    } else {
-                        app.selected_task_index = app.tasks.len().saturating_sub(1);
-                    }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if is_timer_active {
+                    app.status_message = "Cannot change task while timer is running!".to_string();
+                    print!("\x07");
+                } else {
+                    app.list_next();
                 }
-                KeyCode::Char('n') => {
-                    app.input_mode = InputMode::NewTask;
-                    app.input_buffer.clear();
-                    app.input_buffer_2.clear();
-                    app.focused_input_field = 0;
-                    app.status_message = "New Task".to_string();
-                }
-                KeyCode::Char('v') => {
-                    app.show_task_description = !app.show_task_description;
-                    app.status_message = if app.show_task_description {
-                        "Showing task descriptions".to_string()
-                    } else {
-                        "Hidden task descriptions".to_string()
-                    };
-                }
-                KeyCode::Char('/') => {
-                    app.input_mode = InputMode::SearchTasks;
-                    app.input_buffer.clear();
-                    app.status_message = "Search tasks:".to_string();
-                }
-                KeyCode::Char('d') => {
-                    if !app.tasks.is_empty() {
-                        app.input_mode = InputMode::DeleteTaskConfirm;
-                    }
-                }
-                KeyCode::Char('a') => {
-                    let filtered_tasks = app.get_filtered_tasks();
-                    if let Some(task) = filtered_tasks.get(app.selected_task_index)
-                        && let Some(id) = task.get("id").and_then(|v| v.as_str())
-                    {
-                        let id_owned = id.to_string();
-                        app.archive_task(&id_owned).await?;
-                    }
-                }
-                KeyCode::Char('A') if modifiers.contains(KeyModifiers::SHIFT) => {
-                    app.show_archived = !app.show_archived;
+            }
+            KeyCode::Char('g') => {
+                if is_timer_active {
+                    app.status_message = "Cannot change task while timer is running!".to_string();
+                    print!("\x07");
+                } else {
                     app.selected_task_index = 0;
-                    app.status_message = if app.show_archived {
-                        "Viewing ARCHIVED tasks".to_string()
-                    } else {
-                        "Viewing ACTIVE tasks".to_string()
-                    };
                 }
-                KeyCode::Char('e') => {
-                    app.edit_selected_task().await?;
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    if let Some(timer) = &app.timer_info
-                        && let Some(state) = timer.get("state").and_then(|v| v.as_str())
-                        && (state == "running" || state == "paused")
-                    {
-                        app.toggle_pause().await?;
-                        return Ok(());
-                    }
-                    app.start_selected_timer().await?;
-                }
-                KeyCode::Char('x') => {
-                    app.stop_timer().await?;
-                }
-                KeyCode::Char('r') => {
-                    app.status_message = "Refreshing...".to_string();
-                    app.refresh_all().await?;
-                    app.status_message = "Refreshed!".to_string();
-                }
-                _ => {}
             }
-        }
+            KeyCode::Char('G') => {
+                if is_timer_active {
+                    app.status_message = "Cannot change task while timer is running!".to_string();
+                    print!("\x07");
+                } else {
+                    app.selected_task_index = app.tasks.len().saturating_sub(1);
+                }
+            }
+            KeyCode::Char('n') => {
+                app.input_mode = InputMode::NewTask;
+                app.input_buffer.clear();
+                app.input_buffer_2.clear();
+                app.focused_input_field = 0;
+                app.status_message = "New Task".to_string();
+            }
+            KeyCode::Char('v') => {
+                app.show_task_description = !app.show_task_description;
+                app.status_message = if app.show_task_description {
+                    "Showing task descriptions".to_string()
+                } else {
+                    "Hidden task descriptions".to_string()
+                };
+            }
+            KeyCode::Char('/') => {
+                app.input_mode = InputMode::SearchTasks;
+                app.input_buffer.clear();
+                app.status_message = "Search tasks:".to_string();
+            }
+            KeyCode::Char('d') => {
+                if !app.tasks.is_empty() {
+                    app.input_mode = InputMode::DeleteTaskConfirm;
+                }
+            }
+            KeyCode::Char('a') => {
+                let filtered_tasks = app.get_filtered_tasks();
+                if let Some(task) = filtered_tasks.get(app.selected_task_index)
+                    && let Some(id) = task.get("id").and_then(|v| v.as_str())
+                {
+                    let id_owned = id.to_string();
+                    app.archive_task(&id_owned).await?;
+                }
+            }
+            KeyCode::Char('A') if modifiers.contains(KeyModifiers::SHIFT) => {
+                app.show_archived = !app.show_archived;
+                app.selected_task_index = 0;
+                app.status_message = if app.show_archived {
+                    "Viewing ARCHIVED tasks".to_string()
+                } else {
+                    "Viewing ACTIVE tasks".to_string()
+                };
+            }
+            KeyCode::Char('e') => {
+                app.edit_selected_task().await?;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if let Some(timer) = &app.timer_info
+                    && let Some(state) = timer.get("state").and_then(|v| v.as_str())
+                    && (state == "running" || state == "paused")
+                {
+                    app.toggle_pause().await?;
+                    return Ok(());
+                }
+                app.start_selected_timer().await?;
+            }
+            KeyCode::Char('x') => {
+                app.stop_timer().await?;
+            }
+            KeyCode::Char('r') => {
+                app.status_message = "Refreshing...".to_string();
+                app.refresh_all().await?;
+                app.status_message = "Refreshed!".to_string();
+            }
+            _ => {}
+        },
         DashboardPane::ProfileList => match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 if app.selected_profile_index > 0 {
@@ -828,21 +821,17 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
         KeyCode::Left | KeyCode::Char('h') => {
             if modifiers.contains(KeyModifiers::SHIFT) {
                 app.move_kanban_card(-1).await?;
-            } else {
-                if app.selected_column_index > 0 {
-                    app.selected_column_index -= 1;
-                    app.selected_kanban_card_index = 0;
-                }
+            } else if app.selected_column_index > 0 {
+                app.selected_column_index -= 1;
+                app.selected_kanban_card_index = 0;
             }
         }
         KeyCode::Right | KeyCode::Char('l') => {
             if modifiers.contains(KeyModifiers::SHIFT) {
                 app.move_kanban_card(1).await?;
-            } else {
-                if app.selected_column_index < 2 {
-                    app.selected_column_index += 1;
-                    app.selected_kanban_card_index = 0;
-                }
+            } else if app.selected_column_index < 2 {
+                app.selected_column_index += 1;
+                app.selected_kanban_card_index = 0;
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
@@ -1255,9 +1244,7 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
                     match client.profile_list().await {
-                        Ok(profiles) => {
-                            profiles
-                        }
+                        Ok(profiles) => profiles,
                         Err(e) => {
                             eprintln!("✗ Failed to connect to daemon after starting: {}", e);
                             eprintln!("\nTry running manually: mootimerd");

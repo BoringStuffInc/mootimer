@@ -105,7 +105,7 @@ async fn run_daemon(args: Args, api_handler: Arc<ApiHandler>) -> Result<()> {
 
     tracing::info!("Daemon ready and listening");
 
-    use tokio::signal::unix::{signal, SignalKind};
+    use tokio::signal::unix::{SignalKind, signal};
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
 

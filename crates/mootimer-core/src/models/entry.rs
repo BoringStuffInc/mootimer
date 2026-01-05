@@ -1,4 +1,3 @@
-
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -186,7 +185,11 @@ mod tests {
 
     #[test]
     fn test_new_entry() {
-        let entry = Entry::new(Some("task-123".to_string()), Some("Task Title".to_string()), TimerMode::Manual);
+        let entry = Entry::new(
+            Some("task-123".to_string()),
+            Some("Task Title".to_string()),
+            TimerMode::Manual,
+        );
         assert_eq!(entry.task_id, Some("task-123".to_string()));
         assert_eq!(entry.task_title, Some("Task Title".to_string()));
         assert_eq!(entry.mode, TimerMode::Manual);
@@ -211,9 +214,14 @@ mod tests {
         let start = Utc::now();
         let end = start + ChronoDuration::hours(2);
 
-        let entry =
-            Entry::create_completed(Some("task-123".to_string()), Some("Title".to_string()), start, end, TimerMode::Manual)
-                .unwrap();
+        let entry = Entry::create_completed(
+            Some("task-123".to_string()),
+            Some("Title".to_string()),
+            start,
+            end,
+            TimerMode::Manual,
+        )
+        .unwrap();
 
         assert_eq!(entry.duration_seconds, 7200);
         assert!(entry.is_completed());

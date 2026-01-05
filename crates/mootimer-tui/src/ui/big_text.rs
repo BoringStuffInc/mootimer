@@ -42,10 +42,11 @@ impl Widget for BigText<'_> {
                         let gx = area.left() + x_offset + x as u16;
                         let gy = area.top() + y as u16;
 
-                        if gx < buf.area.width && gy < buf.area.height {
-                            if let Some(cell) = buf.cell_mut((gx, gy)) {
-                                cell.set_style(self.style).set_symbol("█");
-                            }
+                        if gx < buf.area.width
+                            && gy < buf.area.height
+                            && let Some(cell) = buf.cell_mut((gx, gy))
+                        {
+                            cell.set_style(self.style).set_symbol("█");
                         }
                     }
                 }
@@ -57,89 +58,125 @@ impl Widget for BigText<'_> {
 
 fn get_char_bitmap(ch: char) -> (usize, Vec<Vec<bool>>) {
     match ch {
-        '0' => (3, vec![
-            vec![true, true, true],
-            vec![true, false, true],
-            vec![true, false, true],
-            vec![true, false, true],
-            vec![true, true, true],
-        ]),
-        '1' => (3, vec![
-            vec![false, true, false],
-            vec![true, true, false],
-            vec![false, true, false],
-            vec![false, true, false],
-            vec![true, true, true],
-        ]),
-        '2' => (3, vec![
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![true, true, true],
-            vec![true, false, false],
-            vec![true, true, true],
-        ]),
-        '3' => (3, vec![
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![true, true, true],
-        ]),
-        '4' => (3, vec![
-            vec![true, false, true],
-            vec![true, false, true],
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![false, false, true],
-        ]),
-        '5' => (3, vec![
-            vec![true, true, true],
-            vec![true, false, false],
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![true, true, true],
-        ]),
-        '6' => (3, vec![
-            vec![true, true, true],
-            vec![true, false, false],
-            vec![true, true, true],
-            vec![true, false, true],
-            vec![true, true, true],
-        ]),
-        '7' => (3, vec![
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![false, false, true],
-            vec![false, false, true],
-            vec![false, false, true],
-        ]),
-        '8' => (3, vec![
-            vec![true, true, true],
-            vec![true, false, true],
-            vec![true, true, true],
-            vec![true, false, true],
-            vec![true, true, true],
-        ]),
-        '9' => (3, vec![
-            vec![true, true, true],
-            vec![true, false, true],
-            vec![true, true, true],
-            vec![false, false, true],
-            vec![true, true, true],
-        ]),
-        ':' => (1, vec![
-            vec![false],
-            vec![true],
-            vec![false],
-            vec![true],
-            vec![false],
-        ]),
-        _ => (3, vec![
-            vec![false, false, false],
-            vec![false, false, false],
-            vec![false, false, false],
-            vec![false, false, false],
-            vec![false, false, false],
-        ]),
+        '0' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![true, false, true],
+                vec![true, false, true],
+                vec![true, false, true],
+                vec![true, true, true],
+            ],
+        ),
+        '1' => (
+            3,
+            vec![
+                vec![false, true, false],
+                vec![true, true, false],
+                vec![false, true, false],
+                vec![false, true, false],
+                vec![true, true, true],
+            ],
+        ),
+        '2' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![true, false, false],
+                vec![true, true, true],
+            ],
+        ),
+        '3' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![true, true, true],
+            ],
+        ),
+        '4' => (
+            3,
+            vec![
+                vec![true, false, true],
+                vec![true, false, true],
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![false, false, true],
+            ],
+        ),
+        '5' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![true, false, false],
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![true, true, true],
+            ],
+        ),
+        '6' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![true, false, false],
+                vec![true, true, true],
+                vec![true, false, true],
+                vec![true, true, true],
+            ],
+        ),
+        '7' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![false, false, true],
+                vec![false, false, true],
+                vec![false, false, true],
+            ],
+        ),
+        '8' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![true, false, true],
+                vec![true, true, true],
+                vec![true, false, true],
+                vec![true, true, true],
+            ],
+        ),
+        '9' => (
+            3,
+            vec![
+                vec![true, true, true],
+                vec![true, false, true],
+                vec![true, true, true],
+                vec![false, false, true],
+                vec![true, true, true],
+            ],
+        ),
+        ':' => (
+            1,
+            vec![
+                vec![false],
+                vec![true],
+                vec![false],
+                vec![true],
+                vec![false],
+            ],
+        ),
+        _ => (
+            3,
+            vec![
+                vec![false, false, false],
+                vec![false, false, false],
+                vec![false, false, false],
+                vec![false, false, false],
+                vec![false, false, false],
+            ],
+        ),
     }
 }

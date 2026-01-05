@@ -1,4 +1,3 @@
-
 mod confirmation;
 pub mod cow;
 mod dashboard;
@@ -11,7 +10,7 @@ mod settings;
 pub mod tomato;
 
 use crate::app::{App, AppView, InputMode};
-use confirmation::{draw_confirmation_modal, draw_break_finished_modal};
+use confirmation::{draw_break_finished_modal, draw_confirmation_modal};
 use dashboard::draw_dashboard;
 use entries::draw_entries;
 use input::draw_input_modal;
@@ -294,20 +293,27 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
 
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let profile_name = get_profile_name(app, &app.profile_id);
-    
+
     let active_task = if let Some(timer) = &app.timer_info {
-        timer.get("task_id").and_then(|id| {
-            app.tasks.iter()
-                .find(|t| t.get("id") == Some(id))
-                .and_then(|t| t.get("title"))
-                .and_then(|v| v.as_str())
-        }).unwrap_or("No active task")
+        timer
+            .get("task_id")
+            .and_then(|id| {
+                app.tasks
+                    .iter()
+                    .find(|t| t.get("id") == Some(id))
+                    .and_then(|t| t.get("title"))
+                    .and_then(|v| v.as_str())
+            })
+            .unwrap_or("No active task")
     } else {
         "No active timer"
     };
 
     let status_content = if !app.status_message.is_empty() {
-        Span::styled(format!(" {} ", app.status_message), Style::default().fg(Color::Black).bg(Color::Yellow))
+        Span::styled(
+            format!(" {} ", app.status_message),
+            Style::default().fg(Color::Black).bg(Color::Yellow),
+        )
     } else {
         match app.input_mode {
             InputMode::Normal => {
@@ -318,15 +324,22 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                 };
                 Span::raw(hints)
             }
-            InputMode::DeleteTaskConfirm | InputMode::DeleteProfileConfirm => {
-                Span::styled(" Confirm: [Y]es / [N]o ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-            }
+            InputMode::DeleteTaskConfirm | InputMode::DeleteProfileConfirm => Span::styled(
+                " Confirm: [Y]es / [N]o ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             _ => Span::raw("[Enter] Submit  [Esc] Cancel"),
         }
     };
 
-    let left_info = Span::styled(format!(" 👤 {} ", profile_name), Style::default().fg(Color::Cyan));
-    let center_info = Span::styled(format!(" 🎯 {} ", active_task), Style::default().fg(Color::Gray));
+    let left_info = Span::styled(
+        format!(" 👤 {} ", profile_name),
+        Style::default().fg(Color::Cyan),
+    );
+    let center_info = Span::styled(
+        format!(" 🎯 {} ", active_task),
+        Style::default().fg(Color::Gray),
+    );
 
     let status_line = Line::from(vec![
         left_info,
@@ -338,7 +351,11 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let status = Paragraph::new(status_line)
         .alignment(Alignment::Left)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
 
     f.render_widget(status, area);
 }

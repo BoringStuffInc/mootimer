@@ -283,7 +283,7 @@ impl App {
             .iter()
             .filter(|t| {
                 let status = t.get("status").and_then(|v| v.as_str()).unwrap_or("todo");
-                
+
                 let matches_status = if self.show_archived {
                     column_index == 0 && status == "archived"
                 } else {
@@ -1011,36 +1011,38 @@ impl App {
 
                     let task_opt = {
                         let filtered_tasks = self.get_filtered_tasks();
-                        filtered_tasks.get(self.selected_task_index).map(|t| (*t).clone())
+                        filtered_tasks
+                            .get(self.selected_task_index)
+                            .map(|t| (*t).clone())
                     };
 
-                    if let Some(mut task) = task_opt {
-                        if let Some(obj) = task.as_object_mut() {
+                    if let Some(mut task) = task_opt
+                        && let Some(obj) = task.as_object_mut()
+                    {
+                        obj.insert(
+                            "title".to_string(),
+                            serde_json::Value::String(new_title.clone()),
+                        );
+
+                        if new_desc.trim().is_empty() {
                             obj.insert(
-                                "title".to_string(),
-                                serde_json::Value::String(new_title.clone()),
+                                "description".to_string(),
+                                serde_json::Value::String("".to_string()),
                             );
+                        } else {
+                            obj.insert(
+                                "description".to_string(),
+                                serde_json::Value::String(new_desc),
+                            );
+                        }
 
-                            if new_desc.trim().is_empty() {
-                                obj.insert(
-                                    "description".to_string(),
-                                    serde_json::Value::String("".to_string()),
-                                );
-                            } else {
-                                obj.insert(
-                                    "description".to_string(),
-                                    serde_json::Value::String(new_desc),
-                                );
+                        match self.client.task_update(&self.profile_id, task).await {
+                            Ok(_) => {
+                                self.status_message = format!("Updated task: {}", new_title);
+                                self.refresh_tasks().await?;
                             }
-
-                            match self.client.task_update(&self.profile_id, task).await {
-                                Ok(_) => {
-                                    self.status_message = format!("Updated task: {}", new_title);
-                                    self.refresh_tasks().await?;
-                                }
-                                Err(e) => {
-                                    self.status_message = format!("Error updating task: {}", e);
-                                }
+                            Err(e) => {
+                                self.status_message = format!("Error updating task: {}", e);
                             }
                         }
                     }
@@ -1270,8 +1272,7 @@ impl App {
         if let Some(task) = filtered_tasks.get(self.selected_task_index)
             && let Some(id) = task.get("id").and_then(|v| v.as_str())
         {
-            match self.client.task_delete(&self.profile_id, id).await
-            {
+            match self.client.task_delete(&self.profile_id, id).await {
                 Ok(_) => {
                     self.status_message = "Task deleted".to_string();
                     self.refresh_tasks().await?;
@@ -1292,8 +1293,16 @@ impl App {
         let task_data = {
             let filtered_tasks = self.get_filtered_tasks();
             if let Some(task) = filtered_tasks.get(self.selected_task_index) {
-                let title = task.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let desc = task.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let title = task
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let desc = task
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 Some((title, desc))
             } else {
                 None
@@ -1514,21 +1523,21 @@ impl App {
     }
 
     pub async fn rename_selected_profile(&mut self, new_name: &str) -> Result<()> {
-        if let Some(mut profile) = self.profiles.get(self.selected_profile_index).cloned() {
-            if let Some(obj) = profile.as_object_mut() {
-                obj.insert(
-                    "name".to_string(),
-                    serde_json::Value::String(new_name.to_string()),
-                );
+        if let Some(mut profile) = self.profiles.get(self.selected_profile_index).cloned()
+            && let Some(obj) = profile.as_object_mut()
+        {
+            obj.insert(
+                "name".to_string(),
+                serde_json::Value::String(new_name.to_string()),
+            );
 
-                match self.client.profile_update(profile).await {
-                    Ok(_) => {
-                        self.status_message = format!("Renamed profile to: {}", new_name);
-                        self.refresh_profiles().await?;
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Error renaming profile: {}", e);
-                    }
+            match self.client.profile_update(profile).await {
+                Ok(_) => {
+                    self.status_message = format!("Renamed profile to: {}", new_name);
+                    self.refresh_profiles().await?;
+                }
+                Err(e) => {
+                    self.status_message = format!("Error renaming profile: {}", e);
                 }
             }
         }

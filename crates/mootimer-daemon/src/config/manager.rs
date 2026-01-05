@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -191,13 +190,7 @@ mod tests {
         let manager = create_manager(&temp_dir);
 
         let updated = manager
-            .update_pomodoro_config(
-                Some(1800),
-                None,
-                None,
-                None,
-                None,
-            )
+            .update_pomodoro_config(Some(1800), None, None, None, None)
             .await
             .unwrap();
 

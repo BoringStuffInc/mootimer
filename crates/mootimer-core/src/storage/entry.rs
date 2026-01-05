@@ -1,4 +1,3 @@
-
 use crate::{
     Result,
     models::{Entry, TimerMode},
@@ -158,7 +157,7 @@ impl EntryStorage {
 
         let mut wtr = csv::Writer::from_path(&entries_path)?;
 
-        wtr.write_record(&[
+        wtr.write_record([
             "id",
             "task_id",
             "task_title",
@@ -171,8 +170,7 @@ impl EntryStorage {
         ])?;
 
         let mut records = rdr.records();
-        if let Some(_) = records.next() {
-        }
+        let _ = records.next();
 
         for result in records {
             let record = result?;

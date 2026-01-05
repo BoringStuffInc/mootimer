@@ -32,7 +32,10 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let arch_hint = if app.show_archived { "Rest" } else { "Arch" };
-    let bottom_hint = format!(" [h/l]Col [j/k]Card [H/L]Move [a]{} [A]View [v]Desc ", arch_hint);
+    let bottom_hint = format!(
+        " [h/l]Col [j/k]Card [H/L]Move [a]{} [A]View [v]Desc ",
+        arch_hint
+    );
 
     for (i, (title, col_idx, color)) in columns.iter().enumerate() {
         let is_col_selected = app.selected_column_index == *col_idx;
@@ -99,7 +102,7 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .title(block_title)
             .border_style(border_style);
-        
+
         if is_col_selected {
             block = block.title_bottom(Line::from(bottom_hint.as_str()).right_aligned());
         }

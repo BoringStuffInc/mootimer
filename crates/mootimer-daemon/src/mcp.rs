@@ -177,7 +177,43 @@ impl McpServer {
                     }
                 },
                 { "name": "get_timer_status", "description": "Get the status of the timer for a specific profile.", "inputSchema": { "type": "object", "properties": { "profile_id": { "type": "string" } }, "required": ["profile_id"] } },
-                { "name": "start_timer", "description": "Start a simple manual (stopwatch) timer.", "inputSchema": { "type": "object", "properties": { "profile_id": { "type": "string" }, "task_id": { "type": "string" } }, "required": ["profile_id"] } },
+                {
+                    "name": "start_timer",
+                    "description": "Start a simple manual (stopwatch) timer.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "profile_id": { "type": "string" },
+                            "task_id": { "type": "string", "description": "Optional task ID to associate with the timer." }
+                        },
+                        "required": ["profile_id"]
+                    }
+                },
+                {
+                    "name": "start_pomodoro_timer",
+                    "description": "Start a standard Pomodoro timer (25m work).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "profile_id": { "type": "string" },
+                            "task_id": { "type": "string", "description": "Optional task ID." }
+                        },
+                        "required": ["profile_id"]
+                    }
+                },
+                {
+                    "name": "start_countdown_timer",
+                    "description": "Start a countdown timer for a specific number of minutes.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "profile_id": { "type": "string" },
+                            "task_id": { "type": "string", "description": "Optional task ID." },
+                            "duration_minutes": { "type": "integer", "description": "Duration in minutes." }
+                        },
+                        "required": ["profile_id", "duration_minutes"]
+                    }
+                },
                 { "name": "stop_timer", "description": "Stops the currently running timer, saving the time entry.", "inputSchema": { "type": "object", "properties": { "profile_id": { "type": "string" } }, "required": ["profile_id"] } }
             ]
         }))

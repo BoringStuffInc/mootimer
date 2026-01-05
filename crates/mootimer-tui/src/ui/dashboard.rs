@@ -3,7 +3,7 @@ use crate::ui::big_text::BigText;
 use mootimer_core::models::{ActiveTimer, PomodoroPhase};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect, Alignment},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
@@ -49,14 +49,16 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
     let hint = if let Some(timer) = &active_timer {
         match timer.state {
-            mootimer_core::models::TimerState::Running | mootimer_core::models::TimerState::Paused => 
-                " [Space]Pause/Resume [x]Stop [r]Refresh ",
+            mootimer_core::models::TimerState::Running
+            | mootimer_core::models::TimerState::Paused => {
+                " [Space]Pause/Resume [x]Stop [r]Refresh "
+            }
             _ => " [t]Type [Space/Enter]Start ",
         }
     } else {
         match app.selected_timer_type {
-             crate::app::TimerType::Manual => " [t]Type [Space/Enter]Start ",
-             _ => " [t]Type [↑↓]Dur [Space/Enter]Start ",
+            crate::app::TimerType::Manual => " [t]Type [Space/Enter]Start ",
+            _ => " [t]Type [↑↓]Dur [Space/Enter]Start ",
         }
     };
 
@@ -71,10 +73,7 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
     let pane_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Fill(1), Constraint::Length(1)])
         .split(inner_area);
 
     let main_area = pane_chunks[0];
@@ -117,7 +116,7 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             .split(main_area)
     };
 
-    let info_area = if show_animation { content_chunks[0] } else { content_chunks[0] };
+    let info_area = content_chunks[0];
 
     if show_animation && content_chunks.len() >= 3 {
         let animation_area = content_chunks[1];
@@ -128,20 +127,23 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             use crate::ui::cow::Cow;
             f.render_stateful_widget(Cow, animation_area, &mut app.cow_state);
         } else if show_manual {
-             let elapsed = active_timer.as_ref().unwrap().current_elapsed();
-             let hours = elapsed / 3600;
-             let minutes = (elapsed % 3600) / 60;
-             let seconds = elapsed % 60;
-             let time_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
-             
-             let text_width = 30; 
-             let text_height = 5;
-             
-             let x = animation_area.x + (animation_area.width.saturating_sub(text_width)) / 2;
-             let y = animation_area.y + (animation_area.height.saturating_sub(text_height)) / 2;
-             
-             let centered_area = Rect::new(x, y, text_width, text_height);
-             f.render_widget(BigText::new(&time_str).style(Style::default().fg(Color::Green)), centered_area);
+            let elapsed = active_timer.as_ref().unwrap().current_elapsed();
+            let hours = elapsed / 3600;
+            let minutes = (elapsed % 3600) / 60;
+            let seconds = elapsed % 60;
+            let time_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+
+            let text_width = 30;
+            let text_height = 5;
+
+            let x = animation_area.x + (animation_area.width.saturating_sub(text_width)) / 2;
+            let y = animation_area.y + (animation_area.height.saturating_sub(text_height)) / 2;
+
+            let centered_area = Rect::new(x, y, text_width, text_height);
+            f.render_widget(
+                BigText::new(&time_str).style(Style::default().fg(Color::Green)),
+                centered_area,
+            );
         }
     }
 
@@ -247,9 +249,27 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             .unwrap_or("No task");
 
         let state_info = match timer.state {
-            mootimer_core::models::TimerState::Running => Span::styled(" RUNNING ", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
-            mootimer_core::models::TimerState::Paused => Span::styled(" PAUSED ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            _ => Span::styled(" STOPPED ", Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD)),
+            mootimer_core::models::TimerState::Running => Span::styled(
+                " RUNNING ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            mootimer_core::models::TimerState::Paused => Span::styled(
+                " PAUSED ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            _ => Span::styled(
+                " STOPPED ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
         };
 
         let mut text_lines = vec![
@@ -270,10 +290,13 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
         if !time_display.is_empty() {
             text_lines.insert(0, Line::from(""));
-            text_lines.insert(0, Line::from(Span::styled(
-                time_display.trim(),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            )));
+            text_lines.insert(
+                0,
+                Line::from(Span::styled(
+                    time_display.trim(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )),
+            );
         }
 
         let text_widget = Paragraph::new(text_lines)
@@ -300,14 +323,8 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
 
         let (timer_type_display, duration_text) = match app.selected_timer_type {
             TimerType::Manual => ("Manual", "Until stopped".to_string()),
-            TimerType::Pomodoro => (
-                "Pomodoro",
-                format!("{}m work", app.pomodoro_minutes),
-            ),
-            TimerType::Countdown => (
-                "Countdown",
-                format!("{}m", app.countdown_minutes),
-            ),
+            TimerType::Pomodoro => ("Pomodoro", format!("{}m work", app.pomodoro_minutes)),
+            TimerType::Countdown => ("Countdown", format!("{}m", app.countdown_minutes)),
         };
 
         let text_lines = vec![
@@ -507,10 +524,7 @@ fn draw_profile_selector(f: &mut Frame, app: &App, area: Rect) {
 
     let (title, border_style) = if app.focused_pane == DashboardPane::ProfileList {
         (
-            format!(
-                " 👤 Profiles ({}) ",
-                app.profiles.len()
-            ),
+            format!(" 👤 Profiles ({}) ", app.profiles.len()),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -553,26 +567,24 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
-        vec![
-            Line::from(vec![
-                Span::styled(
-                    format!("⏱ {}h {:02}m", hours, minutes),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  •  "),
-                Span::styled(
-                    format!("🍅 {} pomodoros", pomodoros),
-                    Style::default().fg(Color::Gray),
-                ),
-                Span::raw("  •  "),
-                Span::styled(
-                    format!("📝 {} entries", entries),
-                    Style::default().fg(Color::Gray),
-                ),
-            ]),
-        ]
+        vec![Line::from(vec![
+            Span::styled(
+                format!("⏱ {}h {:02}m", hours, minutes),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  •  "),
+            Span::styled(
+                format!("🍅 {} pomodoros", pomodoros),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::raw("  •  "),
+            Span::styled(
+                format!("📝 {} entries", entries),
+                Style::default().fg(Color::Gray),
+            ),
+        ])]
     } else {
         vec![Line::from("No data for today")]
     };
@@ -590,7 +602,10 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .title(" 📊 Today ")
         .border_style(Style::default().fg(Color::DarkGray));
-    
+
     f.render_widget(block, area);
-    f.render_widget(Paragraph::new(stats_text).alignment(Alignment::Center), stats_chunks[1]);
+    f.render_widget(
+        Paragraph::new(stats_text).alignment(Alignment::Center),
+        stats_chunks[1],
+    );
 }

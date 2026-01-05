@@ -1,16 +1,17 @@
 use crate::app::{App, InputMode};
 use ratatui::{
     Frame,
-    layout::{Rect, Layout, Constraint, Direction},
-    style::{Color, Style, Modifier},
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
 pub fn draw_input_modal(f: &mut Frame, app: &App) {
     let area = f.area();
-    
-    let is_dual_field = app.input_mode == InputMode::NewTask || app.input_mode == InputMode::EditTask;
+
+    let is_dual_field =
+        app.input_mode == InputMode::NewTask || app.input_mode == InputMode::EditTask;
 
     let width = 60;
     let height = if is_dual_field { 9 } else { 3 };
@@ -25,7 +26,7 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
             .borders(Borders::ALL)
             .title(format!(" {} ", app.status_message))
             .border_style(Style::default().fg(Color::Cyan));
-        
+
         let inner = block.inner(modal_area);
         f.render_widget(block, modal_area);
 
@@ -39,7 +40,9 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
             .split(inner);
 
         let title_style = if app.focused_input_field == 0 {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -51,7 +54,9 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
         f.render_widget(title_input, chunks[0]);
 
         let desc_style = if app.focused_input_field == 1 {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
@@ -62,19 +67,27 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
         let desc_input = Paragraph::new(app.input_buffer_2.as_str()).block(desc_block);
         f.render_widget(desc_input, chunks[1]);
 
-        let instructions = Paragraph::new(Line::from(vec![
-            ratatui::text::Span::styled(" [Tab] Switch Field  [Enter] Submit  [Esc] Cancel ", Style::default().fg(Color::DarkGray)),
-        ]));
-        f.render_widget(instructions, Rect::new(chunks[2].x + 1, chunks[2].y, chunks[2].width, 1));
+        let instructions = Paragraph::new(Line::from(vec![ratatui::text::Span::styled(
+            " [Tab] Switch Field  [Enter] Submit  [Esc] Cancel ",
+            Style::default().fg(Color::DarkGray),
+        )]));
+        f.render_widget(
+            instructions,
+            Rect::new(chunks[2].x + 1, chunks[2].y, chunks[2].width, 1),
+        );
 
         let cursor_x = if app.focused_input_field == 0 {
             (chunks[0].x + 1 + app.input_buffer.len() as u16).min(chunks[0].x + chunks[0].width - 2)
         } else {
-            (chunks[1].x + 1 + app.input_buffer_2.len() as u16).min(chunks[1].x + chunks[1].width - 2)
+            (chunks[1].x + 1 + app.input_buffer_2.len() as u16)
+                .min(chunks[1].x + chunks[1].width - 2)
         };
-        let cursor_y = if app.focused_input_field == 0 { chunks[0].y + 1 } else { chunks[1].y + 1 };
+        let cursor_y = if app.focused_input_field == 0 {
+            chunks[0].y + 1
+        } else {
+            chunks[1].y + 1
+        };
         f.set_cursor_position((cursor_x, cursor_y));
-
     } else {
         let title = if app.status_message.is_empty() {
             "Input"
@@ -90,7 +103,8 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
         let input = Paragraph::new(app.input_buffer.as_str()).block(block);
         f.render_widget(input, modal_area);
 
-        let cursor_x = (modal_area.x + 1 + app.input_buffer.len() as u16).min(modal_area.x + width - 2);
+        let cursor_x =
+            (modal_area.x + 1 + app.input_buffer.len() as u16).min(modal_area.x + width - 2);
         let cursor_y = modal_area.y + 1;
         f.set_cursor_position((cursor_x, cursor_y));
     }

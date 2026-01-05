@@ -19,10 +19,7 @@ fn get_profile_name<'a>(app: &'a App, profile_id: &'a str) -> &'a str {
 pub fn draw_reports(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(12),
-            Constraint::Min(5),
-        ])
+        .constraints([Constraint::Length(12), Constraint::Min(5)])
         .split(area);
 
     draw_report_summary(f, app, chunks[0]);
@@ -109,7 +106,8 @@ fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
                 profile_label
             ))
             .title_bottom(
-                Line::from(format!(" {} | {} | [r]efresh ", period_hint, profile_hint)).right_aligned()
+                Line::from(format!(" {} | {} | [r]efresh ", period_hint, profile_hint))
+                    .right_aligned(),
             ),
     );
     f.render_widget(report, area);
@@ -142,10 +140,7 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
         .map(|(task_id, (secs, count))| (task_id, secs, count))
         .collect();
 
-    task_breakdown.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| a.0.cmp(&b.0))
-    });
+    task_breakdown.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     let mut lines = vec![
         Line::from(""),

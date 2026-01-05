@@ -1,4 +1,3 @@
-
 use chrono::{DateTime, Utc};
 use mootimer_core::models::{Entry, Profile, Task};
 use serde::{Deserialize, Serialize};
@@ -185,6 +184,7 @@ mod tests {
             duration_seconds: 60,
             mode: TimerMode::Manual,
             task_id: None,
+            task_title: None,
             description: None,
             tags: vec![],
         };

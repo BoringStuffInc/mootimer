@@ -1,4 +1,3 @@
-
 use chrono::{DateTime, Utc};
 use mootimer_core::models::{PomodoroPhase, TimerMode};
 use serde::{Deserialize, Serialize};
@@ -18,8 +17,12 @@ pub enum TimerEventType {
         task_id: Option<String>,
         mode: TimerMode,
     },
-    Stopped { duration_seconds: u64 },
-    Paused { elapsed_seconds: u64 },
+    Stopped {
+        duration_seconds: u64,
+    },
+    Paused {
+        elapsed_seconds: u64,
+    },
     Resumed,
     Cancelled,
     Tick {

@@ -280,8 +280,12 @@ mod tests {
     #[tokio::test]
     async fn test_manual_timer_creation() {
         let (tx, _rx) = broadcast::channel(100);
-        let engine =
-            TimerEngine::new_manual("test_profile".to_string(), Some("task1".to_string()), Some("Task Title".to_string()), tx);
+        let engine = TimerEngine::new_manual(
+            "test_profile".to_string(),
+            Some("task1".to_string()),
+            Some("Task Title".to_string()),
+            tx,
+        );
 
         let timer = engine.get_timer().await;
         assert_eq!(timer.profile_id, "test_profile");
@@ -319,7 +323,12 @@ mod tests {
     #[tokio::test]
     async fn test_stop_creates_entry() {
         let (tx, _rx) = broadcast::channel(100);
-        let engine = TimerEngine::new_manual("test".to_string(), Some("task1".to_string()), Some("Task Title".to_string()), tx);
+        let engine = TimerEngine::new_manual(
+            "test".to_string(),
+            Some("task1".to_string()),
+            Some("Task Title".to_string()),
+            tx,
+        );
 
         sleep(Duration::from_millis(1100)).await;
 

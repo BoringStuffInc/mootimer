@@ -1,5 +1,4 @@
 use crate::app::App;
-use chrono;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -32,12 +31,18 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, entry)| {
-                let start_time_str = entry.get("start_time").and_then(|v| v.as_str()).unwrap_or("");
-                let start_time_display = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start_time_str) {
-                    dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()
-                } else {
-                    "--:--:--".to_string()
-                };
+                let start_time_str = entry
+                    .get("start_time")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let start_time_display =
+                    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start_time_str) {
+                        dt.with_timezone(&chrono::Local)
+                            .format("%H:%M:%S")
+                            .to_string()
+                    } else {
+                        "--:--:--".to_string()
+                    };
 
                 let duration_secs = entry
                     .get("duration_seconds")
