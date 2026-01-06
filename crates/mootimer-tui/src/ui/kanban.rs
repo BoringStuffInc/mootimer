@@ -51,7 +51,10 @@ pub fn draw_kanban(f: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .enumerate()
                 .map(|(j, task)| {
-                    let title = task.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
+                    let title = task
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Untitled");
                     let is_card_selected = is_col_selected && app.selected_kanban_card_index == j;
 
                     let style = if is_card_selected {

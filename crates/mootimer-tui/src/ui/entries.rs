@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::ui::helpers::format_duration_hm;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -48,8 +49,6 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
                     .get("duration_seconds")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
-                let hours = duration_secs / 3600;
-                let minutes = (duration_secs % 3600) / 60;
 
                 let task_title = entry.get("task_title").and_then(|v| v.as_str());
                 let task_id = entry.get("task_id").and_then(|v| v.as_str());
@@ -84,10 +83,10 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
                     "countdown" => "⏲ ",
                     _ => "⏱ ",
                 };
-                let time_str = if hours > 0 {
-                    format!("{}h {:02}m", hours, minutes)
+                let time_str = if duration_secs >= 3600 {
+                    format_duration_hm(duration_secs)
                 } else {
-                    format!("{}m", minutes)
+                    format!("{}m", duration_secs / 60)
                 };
 
                 let style = if i == app.selected_entry_index {

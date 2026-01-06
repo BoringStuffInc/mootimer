@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::ui::helpers::format_duration_hm;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -6,15 +7,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-
-fn get_profile_name<'a>(app: &'a App, profile_id: &'a str) -> &'a str {
-    app.profiles
-        .iter()
-        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(profile_id))
-        .and_then(|p| p.get("name"))
-        .and_then(|v| v.as_str())
-        .unwrap_or(profile_id)
-}
 
 pub fn draw_reports(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
@@ -32,8 +24,6 @@ fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
             .get("total_duration_seconds")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let hours = total_secs / 3600;
-        let minutes = (total_secs % 3600) / 60;
         let pomodoros = stats
             .get("pomodoro_count")
             .and_then(|v| v.as_u64())
@@ -50,12 +40,11 @@ fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
             .get("avg_duration_seconds")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let avg_mins = avg_secs / 60;
 
         let profile_label = if app.report_profile == "all" {
             "All Profiles".to_string()
         } else {
-            get_profile_name(app, &app.report_profile).to_string()
+            app.get_profile_name_by_id(&app.report_profile).to_string()
         };
 
         vec![
@@ -71,12 +60,15 @@ fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from(format!("  Total Time:        {}h {:02}m", hours, minutes)),
+            Line::from(format!(
+                "  Total Time:        {}",
+                format_duration_hm(total_secs)
+            )),
             Line::from(format!(
                 "  Total Sessions:    {}  (🍅 {} pomodoro, ⏱ {} manual)",
                 entries, pomodoros, manual
             )),
-            Line::from(format!("  Average Session:   {}m", avg_mins)),
+            Line::from(format!("  Average Session:   {}m", avg_secs / 60)),
         ]
     } else {
         vec![Line::from(""), Line::from("  Loading...")]
@@ -85,7 +77,7 @@ fn draw_report_summary(f: &mut Frame, app: &App, area: Rect) {
     let profile_label = if app.report_profile == "all" {
         "All Profiles"
     } else {
-        get_profile_name(app, &app.report_profile)
+        app.get_profile_name_by_id(&app.report_profile)
     };
 
     let period_hint = "[d]ay [w]eek [m]onth";
@@ -165,12 +157,10 @@ fn draw_task_breakdown(f: &mut Frame, app: &App, area: Rect) {
                 format!("{} [{}]", task_name, &task_id[..8])
             };
 
-            let hours = total_secs / 3600;
-            let minutes = (total_secs % 3600) / 60;
-            let time_str = if hours > 0 {
-                format!("{}h {:02}m", hours, minutes)
+            let time_str = if *total_secs >= 3600 {
+                format_duration_hm(*total_secs)
             } else {
-                format!("{}m", minutes)
+                format!("{}m", total_secs / 60)
             };
 
             let display_name = if task_display.len() > 40 {

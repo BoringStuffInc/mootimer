@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
@@ -60,14 +60,15 @@ impl Request {
 }
 
 struct PersistentConnection {
-    writer: Arc<Mutex<BufWriter<tokio::io::WriteHalf<UnixStream>>>>,
+    writer: mpsc::Sender<Request>,
     pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>>,
 }
 
 pub struct MooTimerClient {
     socket_path: String,
     request_counter: std::sync::atomic::AtomicI64,
-    persistent_conn: Arc<Mutex<Option<PersistentConnection>>>,
+    conn: Arc<RwLock<Option<PersistentConnection>>>,
+    notif_tx: Arc<RwLock<Option<mpsc::Sender<Notification>>>>,
 }
 
 impl MooTimerClient {
@@ -75,146 +76,146 @@ impl MooTimerClient {
         Self {
             socket_path: socket_path.into(),
             request_counter: std::sync::atomic::AtomicI64::new(1),
-            persistent_conn: Arc::new(Mutex::new(None)),
+            conn: Arc::new(RwLock::new(None)),
+            notif_tx: Arc::new(RwLock::new(None)),
         }
     }
 
-    pub async fn subscribe_notifications(&self) -> Result<mpsc::Receiver<Notification>> {
-        let mut conn_lock = self.persistent_conn.lock().await;
-
-        if conn_lock.is_some() {
-            anyhow::bail!("Already subscribed to notifications");
+    async fn ensure_connected(&self) -> Result<PersistentConnection> {
+        {
+            let conn_lock = self.conn.read().await;
+            if let Some(conn) = conn_lock.as_ref() {
+                return Ok(PersistentConnection {
+                    writer: conn.writer.clone(),
+                    pending_responses: conn.pending_responses.clone(),
+                });
+            }
         }
 
-        let stream = self.connect().await?;
-        let (read_half, write_half) = tokio::io::split(stream);
-        let writer = Arc::new(Mutex::new(BufWriter::new(write_half)));
+        let mut conn_lock = self.conn.write().await;
+        if let Some(conn) = conn_lock.as_ref() {
+            return Ok(PersistentConnection {
+                writer: conn.writer.clone(),
+                pending_responses: conn.pending_responses.clone(),
+            });
+        }
 
-        let (notif_tx, notif_rx) = mpsc::channel::<Notification>(100);
+        let stream = UnixStream::connect(&self.socket_path).await?;
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut reader = BufReader::new(read_half);
+
         let pending_responses: Arc<RwLock<HashMap<i64, mpsc::Sender<Response>>>> =
             Arc::new(RwLock::new(HashMap::new()));
+        let (req_tx, mut req_rx) = mpsc::channel::<Request>(100);
 
         let pending_clone = pending_responses.clone();
-        let notif_tx_clone = notif_tx.clone();
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(read_half);
-            let mut line = String::new();
+        let conn_reset = self.conn.clone();
+        let notif_tx_lock = self.notif_tx.clone();
 
+        // Writer task
+        tokio::spawn(async move {
+            while let Some(req) = req_rx.recv().await {
+                let json = match serde_json::to_string(&req) {
+                    Ok(j) => j,
+                    Err(_) => continue,
+                };
+                if write_half.write_all(json.as_bytes()).await.is_err()
+                    || write_half.write_all(b"\n").await.is_err()
+                    || write_half.flush().await.is_err()
+                {
+                    break;
+                }
+            }
+            let mut c = conn_reset.write().await;
+            *c = None;
+        });
+
+        // Reader task
+        let conn_reset_2 = self.conn.clone();
+        tokio::spawn(async move {
+            let mut line = String::new();
             loop {
                 line.clear();
                 match reader.read_line(&mut line).await {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {
-                        if let Ok(notification) = serde_json::from_str::<Notification>(&line) {
-                            let _ = notif_tx_clone.send(notification).await;
-                        } else if let Ok(response) = serde_json::from_str::<Response>(&line)
-                            && let RequestId::Number(id) = response.id
+                        if let Ok(response) = serde_json::from_str::<Response>(&line) {
+                            if let RequestId::Number(id) = response.id {
+                                let pending = pending_clone.read().await;
+                                if let Some(tx) = pending.get(&id) {
+                                    let _ = tx.send(response).await;
+                                }
+                            }
+                        } else if let Ok(notification) = serde_json::from_str::<Notification>(&line)
                         {
-                            let pending = pending_clone.read().await;
-                            if let Some(tx) = pending.get(&id) {
-                                let _ = tx.send(response).await;
+                            let nt = notif_tx_lock.read().await;
+                            if let Some(tx) = nt.as_ref() {
+                                let _ = tx.send(notification).await;
                             }
                         }
                     }
                 }
             }
+            let mut c = conn_reset_2.write().await;
+            *c = None;
         });
 
-        *conn_lock = Some(PersistentConnection {
-            writer,
+        let conn = PersistentConnection {
+            writer: req_tx,
             pending_responses,
+        };
+        *conn_lock = Some(PersistentConnection {
+            writer: conn.writer.clone(),
+            pending_responses: conn.pending_responses.clone(),
         });
 
-        Ok(notif_rx)
+        Ok(conn)
     }
 
-    async fn call_persistent(
-        &self,
-        method: impl Into<String>,
-        params: Option<Value>,
-    ) -> Result<Value> {
-        let method_str = method.into();
-        let conn_lock = self.persistent_conn.lock().await;
+    pub async fn subscribe_notifications(&self) -> Result<mpsc::Receiver<Notification>> {
+        let (tx, rx) = mpsc::channel(100);
+        let mut nt = self.notif_tx.write().await;
+        *nt = Some(tx);
+        let _ = self.ensure_connected().await?;
+        Ok(rx)
+    }
 
-        if let Some(conn) = conn_lock.as_ref() {
-            let _ = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/mootimer-client.log")
-                .and_then(|mut f| {
-                    use std::io::Write;
-                    writeln!(f, "✅ PERSISTENT: {}", method_str)
-                });
-            let method = method_str;
-            let request = Request::new(method, params, self.next_id());
-            let request_id = if let RequestId::Number(id) = request.id.clone() {
-                id
-            } else {
-                anyhow::bail!("Invalid request ID");
-            };
+    pub async fn call(&self, method: impl Into<String>, params: Option<Value>) -> Result<Value> {
+        let conn = self.ensure_connected().await?;
+        let id = self.next_id();
+        let request = Request::new(method, params, id.clone());
 
-            let (tx, mut rx) = mpsc::channel::<Response>(1);
+        let req_id = match id {
+            RequestId::Number(n) => n,
+            _ => anyhow::bail!("Unsupported request ID type"),
+        };
 
-            {
-                let mut pending = conn.pending_responses.write().await;
-                pending.insert(request_id, tx);
-            }
-
-            {
-                let mut writer = conn.writer.lock().await;
-                let request_json = serde_json::to_string(&request)?;
-                writer.write_all(request_json.as_bytes()).await?;
-                writer.write_all(b"\n").await?;
-                writer.flush().await?;
-            }
-
-            let response = rx
-                .recv()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("No response received"))?;
-
-            {
-                let mut pending = conn.pending_responses.write().await;
-                pending.remove(&request_id);
-            }
-
-            if let Some(error) = response.error {
-                anyhow::bail!("RPC error {}: {}", error.code, error.message);
-            }
-
-            return Ok(response.result.unwrap_or(Value::Null));
+        let (tx, mut rx) = mpsc::channel(1);
+        {
+            let mut pending = conn.pending_responses.write().await;
+            pending.insert(req_id, tx);
         }
 
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/mootimer-client.log")
-            .and_then(|mut f| {
-                use std::io::Write;
-                writeln!(f, "❌ ONE-SHOT: {}", method_str)
-            });
-        drop(conn_lock);
-        self.call_oneshot(method_str, params).await
-    }
+        if conn.writer.send(request).await.is_err() {
+            let mut c = self.conn.write().await;
+            *c = None;
+            anyhow::bail!("Failed to send request");
+        }
 
-    async fn call_oneshot(
-        &self,
-        method: impl Into<String>,
-        params: Option<Value>,
-    ) -> Result<Value> {
-        let mut stream = self.connect().await?;
-        let request = Request::new(method, params, self.next_id());
+        let response =
+            match tokio::time::timeout(tokio::time::Duration::from_secs(5), rx.recv()).await {
+                Ok(Some(r)) => r,
+                _ => {
+                    let mut pending = conn.pending_responses.write().await;
+                    pending.remove(&req_id);
+                    anyhow::bail!("Request timed out or connection closed");
+                }
+            };
 
-        let request_json = serde_json::to_string(&request)?;
-        stream.write_all(request_json.as_bytes()).await?;
-        stream.write_all(b"\n").await?;
-        stream.flush().await?;
-
-        let mut reader = BufReader::new(stream);
-        let mut line = String::new();
-        reader.read_line(&mut line).await?;
-
-        let response: Response = serde_json::from_str(&line)?;
+        {
+            let mut pending = conn.pending_responses.write().await;
+            pending.remove(&req_id);
+        }
 
         if let Some(error) = response.error {
             anyhow::bail!("RPC error {}: {}", error.code, error.message);
@@ -223,19 +224,11 @@ impl MooTimerClient {
         Ok(response.result.unwrap_or(Value::Null))
     }
 
-    async fn connect(&self) -> Result<UnixStream> {
-        Ok(UnixStream::connect(&self.socket_path).await?)
-    }
-
     fn next_id(&self) -> RequestId {
         let id = self
             .request_counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         RequestId::Number(id)
-    }
-
-    pub async fn call(&self, method: impl Into<String>, params: Option<Value>) -> Result<Value> {
-        self.call_persistent(method, params).await
     }
 
     pub async fn timer_start_manual(

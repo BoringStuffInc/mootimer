@@ -121,6 +121,7 @@ pub struct App {
     pub show_task_description: bool,
     pub tomato_state: TomatoState,
     pub cow_state: CowState,
+    pub selected_timer_button: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +182,7 @@ impl App {
             show_task_description: false,
             tomato_state: TomatoState::new(),
             cow_state: CowState::new(),
+            selected_timer_button: 0,
         }
     }
 
@@ -201,12 +203,16 @@ impl App {
     }
 
     pub fn get_profile_name(&self) -> &str {
+        self.get_profile_name_by_id(&self.profile_id)
+    }
+
+    pub fn get_profile_name_by_id<'a>(&'a self, profile_id: &'a str) -> &'a str {
         self.profiles
             .iter()
-            .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&self.profile_id))
+            .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(profile_id))
             .and_then(|p| p.get("name"))
             .and_then(|v| v.as_str())
-            .unwrap_or(&self.profile_id)
+            .unwrap_or(profile_id)
     }
 
     pub fn get_filtered_tasks(&self) -> Vec<&Value> {
@@ -273,6 +279,23 @@ impl App {
                     false
                 })
                 .collect()
+        }
+    }
+
+    pub fn get_selected_kanban_task_id(&self) -> Option<String> {
+        self.get_kanban_tasks(self.selected_column_index)
+            .get(self.selected_kanban_card_index)
+            .and_then(|t| t.get("id").and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+    }
+
+    pub fn sync_kanban_to_task_index(&mut self, task_id: &str) {
+        if let Some(idx) = self
+            .tasks
+            .iter()
+            .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(task_id))
+        {
+            self.selected_task_index = idx;
         }
     }
 
@@ -848,6 +871,7 @@ impl App {
         match self.client.timer_stop(&self.profile_id).await {
             Ok(_) => {
                 self.status_message = "Timer stopped, entry saved!".to_string();
+                self.selected_timer_button = 0;
                 self.refresh_timer().await?;
                 self.refresh_stats().await?;
                 self.refresh_entries().await?;
@@ -1012,109 +1036,20 @@ impl App {
                 self.selected_entry_index = 0;
             }
             InputMode::ConfigPomodoro => {
-                if let Ok(minutes) = self.input_buffer.parse::<u64>() {
-                    if minutes == 0 {
-                        self.status_message = "Duration cannot be zero.".to_string();
-                    } else {
-                        let seconds = minutes * 60;
-                        match self
-                            .client
-                            .call(
-                                "config.update_pomodoro",
-                                Some(serde_json::json!({"work_duration": seconds})),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                self.status_message =
-                                    format!("Work duration set to {} minutes", minutes);
-                                self.refresh_config().await?;
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Error: {}", e);
-                            }
-                        }
-                    }
-                }
+                self.update_config_duration("work_duration", "Work duration")
+                    .await?;
             }
             InputMode::ConfigShortBreak => {
-                if let Ok(minutes) = self.input_buffer.parse::<u64>() {
-                    if minutes == 0 {
-                        self.status_message = "Duration cannot be zero.".to_string();
-                    } else {
-                        let seconds = minutes * 60;
-                        match self
-                            .client
-                            .call(
-                                "config.update_pomodoro",
-                                Some(serde_json::json!({"short_break": seconds})),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                self.status_message =
-                                    format!("Short break set to {} minutes", minutes);
-                                self.refresh_config().await?;
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Error: {}", e);
-                            }
-                        }
-                    }
-                }
+                self.update_config_duration("short_break", "Short break")
+                    .await?;
             }
             InputMode::ConfigLongBreak => {
-                if let Ok(minutes) = self.input_buffer.parse::<u64>() {
-                    if minutes == 0 {
-                        self.status_message = "Duration cannot be zero.".to_string();
-                    } else {
-                        let seconds = minutes * 60;
-                        match self
-                            .client
-                            .call(
-                                "config.update_pomodoro",
-                                Some(serde_json::json!({"long_break": seconds})),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                self.status_message =
-                                    format!("Long break set to {} minutes", minutes);
-                                self.refresh_config().await?;
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Error: {}", e);
-                            }
-                        }
-                    }
-                }
+                self.update_config_duration("long_break", "Long break")
+                    .await?;
             }
             InputMode::ConfigCountdown => {
-                if let Ok(minutes) = self.input_buffer.parse::<u64>() {
-                    if minutes == 0 {
-                        self.status_message = "Duration cannot be zero.".to_string();
-                    } else {
-                        let seconds = minutes * 60;
-                        match self
-                            .client
-                            .call(
-                                "config.update_pomodoro",
-                                Some(serde_json::json!({"countdown_default": seconds})),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                self.countdown_minutes = minutes;
-                                self.status_message =
-                                    format!("Countdown default set to {} minutes", minutes);
-                                self.refresh_config().await?;
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Error: {}", e);
-                            }
-                        }
-                    }
-                }
+                self.update_config_duration("countdown_default", "Countdown default")
+                    .await?;
             }
             InputMode::NewProfile => {
                 if !self.input_buffer.is_empty() {
@@ -1403,8 +1338,14 @@ impl App {
         self.status_message = "Syncing...".to_string();
         match self.client.call("sync.sync", None).await {
             Ok(result) => {
-                let pulled = result.get("pulled").and_then(|v| v.as_bool()).unwrap_or(false);
-                let pushed = result.get("pushed").and_then(|v| v.as_bool()).unwrap_or(false);
+                let pulled = result
+                    .get("pulled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let pushed = result
+                    .get("pushed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 self.status_message = match (pulled, pushed) {
                     (true, true) => "Sync complete (Pulled & Pushed)".to_string(),
@@ -1416,6 +1357,39 @@ impl App {
             }
             Err(e) => {
                 self.status_message = format!("Sync failed: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_config_duration(&mut self, config_key: &str, display_name: &str) -> Result<()> {
+        let Ok(minutes) = self.input_buffer.parse::<u64>() else {
+            return Ok(());
+        };
+
+        if minutes == 0 {
+            self.status_message = "Duration cannot be zero.".to_string();
+            return Ok(());
+        }
+
+        let seconds = minutes * 60;
+        match self
+            .client
+            .call(
+                "config.update_pomodoro",
+                Some(serde_json::json!({ config_key: seconds })),
+            )
+            .await
+        {
+            Ok(_) => {
+                self.status_message = format!("{} set to {} minutes", display_name, minutes);
+                if config_key == "countdown_default" {
+                    self.countdown_minutes = minutes;
+                }
+                self.refresh_config().await?;
+            }
+            Err(e) => {
+                self.status_message = format!("Error: {}", e);
             }
         }
         Ok(())

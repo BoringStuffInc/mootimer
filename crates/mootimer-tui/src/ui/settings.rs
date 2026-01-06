@@ -28,7 +28,7 @@ pub fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                         .as_ref()
                         .and_then(|c| c.get("pomodoro").and_then(|p| p.get("work_duration")))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(0)
+                        .unwrap_or(1500)
                         / 60;
                     Line::from(vec![
                         Span::styled(
@@ -49,7 +49,7 @@ pub fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                         .as_ref()
                         .and_then(|c| c.get("pomodoro").and_then(|p| p.get("short_break")))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(0)
+                        .unwrap_or(300)
                         / 60;
                     Line::from(vec![
                         Span::styled(
@@ -70,7 +70,7 @@ pub fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                         .as_ref()
                         .and_then(|c| c.get("pomodoro").and_then(|p| p.get("long_break")))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(0)
+                        .unwrap_or(900)
                         / 60;
                     Line::from(vec![
                         Span::styled(

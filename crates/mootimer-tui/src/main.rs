@@ -2,7 +2,7 @@ mod app;
 mod ui;
 
 use anyhow::Result;
-use app::{App, AppView, InputMode};
+use app::{App, AppView, DashboardPane, InputMode};
 use clap::Parser;
 use crossterm::{
     event::{
@@ -344,23 +344,16 @@ async fn handle_mouse_event(
                                 app.selected_kanban_card_index = idx;
                             }
                         }
-                    } else if old_view == AppView::Kanban && new_view == AppView::Dashboard {
-                        let target_tid = {
-                            let tasks = app.get_kanban_tasks(app.selected_column_index);
-                            tasks
-                                .get(app.selected_kanban_card_index)
-                                .and_then(|task| task.get("id").and_then(|v| v.as_str()))
-                                .map(|s| s.to_string())
-                        };
-
-                        if let Some(tid) = target_tid {
-                            let filtered = app.get_filtered_tasks();
-                            if let Some(idx) = filtered
-                                .iter()
-                                .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                            {
-                                app.selected_task_index = idx;
-                            }
+                    } else if old_view == AppView::Kanban
+                        && new_view == AppView::Dashboard
+                        && let Some(tid) = app.get_selected_kanban_task_id()
+                    {
+                        let filtered = app.get_filtered_tasks();
+                        if let Some(idx) = filtered
+                            .iter()
+                            .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
+                        {
+                            app.selected_task_index = idx;
                         }
                     }
 
@@ -536,23 +529,15 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             }
         }
         KeyCode::Char('1') => {
-            if app.current_view == AppView::Kanban {
-                let target_tid = {
-                    let tasks = app.get_kanban_tasks(app.selected_column_index);
-                    tasks
-                        .get(app.selected_kanban_card_index)
-                        .and_then(|task| task.get("id").and_then(|v| v.as_str()))
-                        .map(|s| s.to_string())
-                };
-
-                if let Some(tid) = target_tid {
-                    let filtered = app.get_filtered_tasks();
-                    if let Some(idx) = filtered
-                        .iter()
-                        .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                    {
-                        app.selected_task_index = idx;
-                    }
+            if app.current_view == AppView::Kanban
+                && let Some(tid) = app.get_selected_kanban_task_id()
+            {
+                let filtered = app.get_filtered_tasks();
+                if let Some(idx) = filtered
+                    .iter()
+                    .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
+                {
+                    app.selected_task_index = idx;
                 }
             }
             app.current_view = AppView::Dashboard;
@@ -626,13 +611,21 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
     Ok(())
 }
 
+fn get_active_timer_button_count(app: &App) -> usize {
+    if let Some(timer) = &app.timer_info
+        && let Some(state) = timer.get("state").and_then(|v| v.as_str())
+        && (state == "running" || state == "paused")
+    {
+        return 2;
+    }
+    1
+}
+
 async fn handle_dashboard_keys(
     app: &mut App,
     code: KeyCode,
     modifiers: KeyModifiers,
 ) -> Result<()> {
-    use crate::app::DashboardPane;
-
     let is_timer_active = if let Some(timer) = &app.timer_info {
         if let Some(state) = timer.get("state").and_then(|v| v.as_str()) {
             state == "running" || state == "paused"
@@ -655,12 +648,29 @@ async fn handle_dashboard_keys(
                     app.adjust_timer_duration_down();
                 }
             }
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                if is_timer_active {
+                    let button_count = get_active_timer_button_count(app);
+                    app.selected_timer_button = (app.selected_timer_button + 1) % button_count;
+                }
+            }
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                if is_timer_active {
+                    let button_count = get_active_timer_button_count(app);
+                    app.selected_timer_button = if app.selected_timer_button == 0 {
+                        button_count - 1
+                    } else {
+                        app.selected_timer_button - 1
+                    };
+                }
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                if let Some(timer) = &app.timer_info
-                    && let Some(state) = timer.get("state").and_then(|v| v.as_str())
-                    && (state == "running" || state == "paused")
-                {
-                    app.toggle_pause().await?;
+                if is_timer_active {
+                    match app.selected_timer_button {
+                        0 => app.toggle_pause().await?,
+                        1 => app.stop_timer().await?,
+                        _ => {}
+                    }
                     return Ok(());
                 }
                 app.start_selected_timer().await?;
@@ -909,75 +919,27 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
 
             if let Some(title) = title_to_edit {
                 app.input_mode = InputMode::EditTask;
-                let task_id = {
-                    let tasks = app.get_kanban_tasks(app.selected_column_index);
-                    tasks
-                        .get(app.selected_kanban_card_index)
-                        .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                        .map(|s| s.to_string())
-                };
-
-                if let Some(tid) = task_id
-                    && let Some(idx) = app
-                        .tasks
-                        .iter()
-                        .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                {
-                    app.selected_task_index = idx;
+                if let Some(tid) = app.get_selected_kanban_task_id() {
+                    app.sync_kanban_to_task_index(&tid);
                 }
-
                 app.input_buffer = title;
                 app.status_message = "Edit task title:".to_string();
             }
         }
         KeyCode::Char('d') => {
-            let task_id = {
-                let tasks = app.get_kanban_tasks(app.selected_column_index);
-                tasks
-                    .get(app.selected_kanban_card_index)
-                    .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string())
-            };
-
-            if let Some(tid) = task_id
-                && let Some(idx) = app
-                    .tasks
-                    .iter()
-                    .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-            {
-                app.selected_task_index = idx;
+            if let Some(tid) = app.get_selected_kanban_task_id() {
+                app.sync_kanban_to_task_index(&tid);
                 app.input_mode = InputMode::DeleteTaskConfirm;
             }
         }
         KeyCode::Char('a') => {
-            let task_id = {
-                let tasks = app.get_kanban_tasks(app.selected_column_index);
-                tasks
-                    .get(app.selected_kanban_card_index)
-                    .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string())
-            };
-
-            if let Some(tid) = task_id {
+            if let Some(tid) = app.get_selected_kanban_task_id() {
                 app.archive_task(&tid).await?;
             }
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
-            let task_id = {
-                let tasks = app.get_kanban_tasks(app.selected_column_index);
-                tasks
-                    .get(app.selected_kanban_card_index)
-                    .and_then(|t| t.get("id").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string())
-            };
-
-            if let Some(tid) = task_id
-                && let Some(idx) = app
-                    .tasks
-                    .iter()
-                    .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-            {
-                app.selected_task_index = idx;
+            if let Some(tid) = app.get_selected_kanban_task_id() {
+                app.sync_kanban_to_task_index(&tid);
                 app.start_selected_timer().await?;
             }
         }

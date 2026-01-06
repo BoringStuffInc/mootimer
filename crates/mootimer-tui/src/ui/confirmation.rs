@@ -1,20 +1,15 @@
 use crate::app::{App, InputMode};
+use crate::ui::helpers::centered_rect;
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
 pub fn draw_confirmation_modal(f: &mut Frame, app: &App) {
-    let area = f.area();
-    let width = 60;
-    let height = 10;
-    let x = (area.width.saturating_sub(width)) / 2;
-    let y = (area.height.saturating_sub(height)) / 2;
-
-    let modal_area = Rect::new(x, y, width, height);
+    let modal_area = centered_rect(f.area(), 60, 10);
 
     f.render_widget(Clear, modal_area);
 
@@ -85,13 +80,7 @@ pub fn draw_confirmation_modal(f: &mut Frame, app: &App) {
 }
 
 pub fn draw_break_finished_modal(f: &mut Frame) {
-    let area = f.area();
-    let width = 60;
-    let height = 10;
-    let x = (area.width.saturating_sub(width)) / 2;
-    let y = (area.height.saturating_sub(height)) / 2;
-
-    let modal_area = Rect::new(x, y, width, height);
+    let modal_area = centered_rect(f.area(), 60, 10);
 
     f.render_widget(Clear, modal_area);
 

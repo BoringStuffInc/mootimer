@@ -1,7 +1,9 @@
+mod buttons;
 mod confirmation;
 pub mod cow;
 mod dashboard;
 mod entries;
+pub mod helpers;
 mod input;
 mod kanban;
 mod logs;
@@ -25,15 +27,6 @@ use ratatui::{
 };
 use reports::draw_reports;
 use settings::draw_settings;
-
-fn get_profile_name<'a>(app: &'a App, profile_id: &'a str) -> &'a str {
-    app.profiles
-        .iter()
-        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(profile_id))
-        .and_then(|p| p.get("name"))
-        .and_then(|v| v.as_str())
-        .unwrap_or(profile_id)
-}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -115,7 +108,7 @@ fn draw_title_bar(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!("[{}] │ ", get_profile_name(app, &app.profile_id))),
+        Span::raw(format!("[{}] │ ", app.get_profile_name())),
     ];
 
     for (i, (key, icon, name, view)) in tabs.iter().enumerate() {
@@ -297,7 +290,7 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
 }
 
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
-    let profile_name = get_profile_name(app, &app.profile_id);
+    let profile_name = app.get_profile_name();
 
     let active_task = if let Some(timer) = &app.timer_info {
         timer
@@ -352,29 +345,38 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     );
 
     let sync_info = if let Some(sync) = &app.sync_status {
-        let initialized = sync.get("initialized").and_then(|v| v.as_bool()).unwrap_or(false);
+        let initialized = sync
+            .get("initialized")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if initialized {
             let ahead = sync.get("ahead").and_then(|v| v.as_u64()).unwrap_or(0);
             let behind = sync.get("behind").and_then(|v| v.as_u64()).unwrap_or(0);
-            let changes = sync.get("has_changes").and_then(|v| v.as_bool()).unwrap_or(false);
+            let changes = sync
+                .get("has_changes")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
             let mut sync_spans = vec![Span::raw(" │ ")];
 
             if ahead > 0 || behind > 0 || changes {
                 let mut details = Vec::new();
-                if ahead > 0 { details.push(format!("↑{}", ahead)); }
-                if behind > 0 { details.push(format!("↓{}", behind)); }
-                if changes { details.push("*".to_string()); }
+                if ahead > 0 {
+                    details.push(format!("↑{}", ahead));
+                }
+                if behind > 0 {
+                    details.push(format!("↓{}", behind));
+                }
+                if changes {
+                    details.push("*".to_string());
+                }
 
                 sync_spans.push(Span::styled(
                     format!(" ☁ {} ", details.join(" ")),
                     Style::default().fg(Color::Yellow),
                 ));
             } else {
-                sync_spans.push(Span::styled(
-                    " ☁ ok ",
-                    Style::default().fg(Color::Green),
-                ));
+                sync_spans.push(Span::styled(" ☁ ok ", Style::default().fg(Color::Green)));
             }
             sync_spans
         } else {

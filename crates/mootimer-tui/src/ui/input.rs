@@ -1,4 +1,5 @@
 use crate::app::{App, InputMode};
+use crate::ui::helpers::centered_rect;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -8,18 +9,12 @@ use ratatui::{
 };
 
 pub fn draw_input_modal(f: &mut Frame, app: &App) {
-    let area = f.area();
-
     let is_dual_field =
         app.input_mode == InputMode::NewTask || app.input_mode == InputMode::EditTask;
     let is_quick_add = app.input_mode == InputMode::QuickAddTask;
 
-    let width = 60;
     let height = if is_dual_field { 9 } else { 5 };
-    let x = (area.width.saturating_sub(width)) / 2;
-    let y = (area.height.saturating_sub(height)) / 2;
-
-    let modal_area = Rect::new(x, y, width, height);
+    let modal_area = centered_rect(f.area(), 60, height);
     f.render_widget(Clear, modal_area);
 
     if is_dual_field {
@@ -118,8 +113,7 @@ pub fn draw_input_modal(f: &mut Frame, app: &App) {
             Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
 
-        let cursor_x =
-            (inner.x + app.input_buffer.len() as u16).min(inner.x + inner.width - 1);
+        let cursor_x = (inner.x + app.input_buffer.len() as u16).min(inner.x + inner.width - 1);
         let cursor_y = inner.y;
         f.set_cursor_position((cursor_x, cursor_y));
     }
