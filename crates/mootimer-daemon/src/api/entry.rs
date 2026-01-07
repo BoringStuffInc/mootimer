@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use mootimer_core::models::{Entry, TimerMode};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -6,10 +7,20 @@ use std::sync::Arc;
 use super::{ApiError, Result};
 use crate::entry::{EntryFilter, EntryManager};
 use crate::profile::ProfileManager;
+use crate::task::TaskManager;
 
 #[derive(Debug, Deserialize)]
 struct ListEntriesParams {
     profile_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateEntryParams {
+    profile_id: String,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+    task_id: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +47,46 @@ struct DeleteEntryParams {
 struct UpdateEntryParams {
     profile_id: String,
     entry: mootimer_core::models::Entry,
+}
+
+pub async fn create(
+    entry_manager: &Arc<EntryManager>,
+    task_manager: &Arc<TaskManager>,
+    params: Option<Value>,
+) -> Result<Value> {
+    let params: CreateEntryParams = serde_json::from_value(
+        params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
+    )?;
+
+    let task_title = if let Some(ref task_id) = params.task_id {
+        task_manager
+            .get(&params.profile_id, task_id)
+            .await
+            .ok()
+            .map(|t| t.title.clone())
+    } else {
+        None
+    };
+
+    let mut entry = Entry::create_completed(
+        params.task_id,
+        task_title,
+        params.start_time,
+        params.end_time,
+        TimerMode::Manual,
+    )
+    .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
+
+    if let Some(desc) = params.description {
+        entry.update_description(Some(desc));
+    }
+
+    let entry = entry_manager
+        .add(&params.profile_id, entry)
+        .await
+        .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
+
+    Ok(serde_json::to_value(&entry)?)
 }
 
 pub async fn delete(manager: &Arc<EntryManager>, params: Option<Value>) -> Result<Value> {

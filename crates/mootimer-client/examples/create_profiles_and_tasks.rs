@@ -1,5 +1,4 @@
 use mootimer_client::MooTimerClient;
-use serde_json::json;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

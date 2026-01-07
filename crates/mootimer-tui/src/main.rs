@@ -264,146 +264,410 @@ async fn handle_mouse_event(
     mouse: event::MouseEvent,
     term_size: ratatui::layout::Rect,
 ) -> Result<()> {
-    if mouse.kind == event::MouseEventKind::Down(event::MouseButton::Left) {
-        if mouse.row == 1 {
-            let tabs = [
-                ("1", "📊", "Dashboard", AppView::Dashboard),
-                ("2", "📋", "Kanban", AppView::Kanban),
-                ("3", "📝", "Entries", AppView::Entries),
-                ("4", "📈", "Reports", AppView::Reports),
-                ("5", "⚙️", "Settings", AppView::Settings),
-                ("6", "📋", "Logs", AppView::Logs),
-            ];
+    let content_start_y = 3;
+    let content_end_y = term_size.height.saturating_sub(3);
+    let content_area = ratatui::layout::Rect {
+        x: 0,
+        y: content_start_y,
+        width: term_size.width,
+        height: content_end_y - content_start_y,
+    };
 
-            let profile_name = app.get_profile_name();
-            let prefix_width = 11 + 1 + profile_name.len() as u16 + 1 + 1 + 1 + 1;
-
-            let mut total_width = prefix_width;
-            let mut tab_regions = Vec::new();
-
-            for (i, (_key, _icon, name, view)) in tabs.iter().enumerate() {
-                if i > 0 {
-                    total_width += 1;
+    match mouse.kind {
+        event::MouseEventKind::Down(event::MouseButton::Left) => {
+            if mouse.row == 1 {
+                handle_tab_click(app, mouse, term_size).await?;
+            } else if mouse.row >= content_start_y && mouse.row < content_end_y {
+                match app.current_view {
+                    AppView::Dashboard => handle_dashboard_mouse(app, mouse, content_area).await?,
+                    AppView::Kanban => handle_kanban_mouse_down(app, mouse, content_area).await?,
+                    AppView::Entries => handle_entries_mouse(app, mouse, content_area),
+                    AppView::Timers => handle_timers_mouse(app, mouse, content_area),
+                    AppView::Settings => handle_settings_mouse(app, mouse, content_area),
+                    _ => {}
                 }
-
-                let is_active = *view == app.current_view;
-
-                let content_width = if is_active {
-                    1 + 2 + name.len() as u16 + 1
-                } else {
-                    1 + 1 + 1 + 2 + name.len() as u16
-                };
-
-                tab_regions.push((*view, content_width));
-                total_width += content_width;
             }
-
-            total_width += 10;
-
-            let start_x = (term_size.width.saturating_sub(total_width)) / 2;
-            let mut current_x = start_x + prefix_width;
-
-            for (i, (view, width)) in tab_regions.iter().enumerate() {
-                if i > 0 {
-                    current_x += 1;
-                }
-
-                if mouse.column >= current_x && mouse.column < current_x + width {
-                    let old_view = app.current_view;
-                    let new_view = *view;
-
-                    if old_view == AppView::Dashboard && new_view == AppView::Kanban {
-                        let sync_target = {
-                            let filtered = app.get_filtered_tasks();
-                            if let Some(task) = filtered.get(app.selected_task_index)
-                                && let Some(tid) = task.get("id").and_then(|v| v.as_str())
-                            {
-                                let status = task
-                                    .get("status")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("todo");
-                                let col_idx = match status {
-                                    "todo" => Some(0),
-                                    "in_progress" => Some(1),
-                                    "done" | "completed" => Some(2),
-                                    _ => None,
-                                };
-                                col_idx.map(|c| (c, tid.to_string()))
-                            } else {
-                                None
-                            }
-                        };
-
-                        if let Some((c, tid)) = sync_target {
-                            app.selected_column_index = c;
-                            let k_tasks = app.get_kanban_tasks(c);
-                            if let Some(idx) = k_tasks
-                                .iter()
-                                .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                            {
-                                app.selected_kanban_card_index = idx;
-                            }
-                        }
-                    } else if old_view == AppView::Kanban
-                        && new_view == AppView::Dashboard
-                        && let Some(tid) = app.get_selected_kanban_task_id()
-                    {
-                        let filtered = app.get_filtered_tasks();
-                        if let Some(idx) = filtered
-                            .iter()
-                            .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
-                        {
-                            app.selected_task_index = idx;
-                        }
-                    }
-
-                    app.current_view = *view;
-                    match view {
-                        AppView::Dashboard => app.refresh_tasks().await?,
-                        AppView::Kanban => app.refresh_tasks().await?,
-                        AppView::Entries => app.refresh_entries().await?,
-                        AppView::Reports => {
-                            app.refresh_tasks().await?;
-                            app.refresh_reports().await?;
-                        }
-                        AppView::Settings => {}
-                        AppView::Logs => app.refresh_logs().await?,
-                    }
-                    return Ok(());
-                }
-
-                current_x += width;
-            }
-        } else if app.current_view == AppView::Kanban {
-            handle_kanban_mouse(app, mouse, term_size).await?;
         }
+        event::MouseEventKind::Drag(event::MouseButton::Left) => {
+            if app.current_view == AppView::Kanban {
+                handle_kanban_mouse_drag(app, mouse, content_area);
+            }
+        }
+        event::MouseEventKind::Up(event::MouseButton::Left) => {
+            if app.current_view == AppView::Kanban && app.kanban_drag.is_some() {
+                handle_kanban_mouse_up(app, mouse, content_area).await?;
+            }
+        }
+        _ => {}
     }
+
     Ok(())
 }
 
-async fn handle_kanban_mouse(
+async fn handle_tab_click(
     app: &mut App,
     mouse: event::MouseEvent,
     term_size: ratatui::layout::Rect,
 ) -> Result<()> {
-    if mouse.row >= 3 && mouse.row < term_size.height.saturating_sub(6) {
-        let col_width = term_size.width.saturating_div(3);
-        if col_width == 0 {
+    let tabs = [
+        ("1", "📊", "Dashboard", AppView::Dashboard),
+        ("2", "⏱️", "Timers", AppView::Timers),
+        ("3", "📋", "Kanban", AppView::Kanban),
+        ("4", "📝", "Entries", AppView::Entries),
+        ("5", "📈", "Reports", AppView::Reports),
+        ("6", "⚙️", "Settings", AppView::Settings),
+        ("7", "📋", "Logs", AppView::Logs),
+    ];
+
+    let profile_name = app.get_profile_name();
+    let prefix_width = 11 + 1 + profile_name.len() as u16 + 1 + 1 + 1 + 1;
+
+    let mut total_width = prefix_width;
+    let mut tab_regions = Vec::new();
+
+    const EMOJI_WIDTH: u16 = 2;
+
+    for (i, (_key, _icon, name, view)) in tabs.iter().enumerate() {
+        if i > 0 {
+            total_width += 1;
+        }
+
+        let is_active = *view == app.current_view;
+
+        let content_width = if is_active {
+            1 + EMOJI_WIDTH + name.len() as u16 + 1
+        } else {
+            1 + 1 + 1 + EMOJI_WIDTH + name.len() as u16
+        };
+
+        tab_regions.push((*view, content_width));
+        total_width += content_width;
+    }
+
+    total_width += 10;
+
+    let start_x = (term_size.width.saturating_sub(total_width)) / 2;
+    let mut current_x = start_x + prefix_width;
+
+    for (i, (view, width)) in tab_regions.iter().enumerate() {
+        if i > 0 {
+            current_x += 1;
+        }
+
+        if mouse.column >= current_x && mouse.column < current_x + width {
+            let old_view = app.current_view;
+            let new_view = *view;
+
+            if old_view == AppView::Dashboard && new_view == AppView::Kanban {
+                let sync_target = {
+                    let filtered = app.get_filtered_tasks();
+                    if let Some(task) = filtered.get(app.selected_task_index)
+                        && let Some(tid) = task.get("id").and_then(|v| v.as_str())
+                    {
+                        let status = task
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("todo");
+                        let col_idx = match status {
+                            "todo" => Some(0),
+                            "in_progress" => Some(1),
+                            "done" | "completed" => Some(2),
+                            _ => None,
+                        };
+                        col_idx.map(|c| (c, tid.to_string()))
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some((c, tid)) = sync_target {
+                    app.selected_column_index = c;
+                    let k_tasks = app.get_kanban_tasks(c);
+                    if let Some(idx) = k_tasks
+                        .iter()
+                        .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
+                    {
+                        app.selected_kanban_card_index = idx;
+                    }
+                }
+            } else if old_view == AppView::Kanban
+                && new_view == AppView::Dashboard
+                && let Some(tid) = app.get_selected_kanban_task_id()
+            {
+                let filtered = app.get_filtered_tasks();
+                if let Some(idx) = filtered
+                    .iter()
+                    .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&tid))
+                {
+                    app.selected_task_index = idx;
+                }
+            }
+
+            app.current_view = *view;
+            match view {
+                AppView::Dashboard => app.refresh_tasks().await?,
+                AppView::Timers => app.refresh_timer().await?,
+                AppView::Kanban => app.refresh_tasks().await?,
+                AppView::Entries => app.refresh_entries().await?,
+                AppView::Reports => {
+                    app.refresh_tasks().await?;
+                    app.refresh_reports().await?;
+                }
+                AppView::Settings => {}
+                AppView::Logs => app.refresh_logs().await?,
+            }
             return Ok(());
         }
-        let col_idx = (mouse.column.saturating_div(col_width)).min(2) as usize;
 
-        app.selected_column_index = col_idx;
+        current_x += width;
+    }
 
-        if mouse.row >= 4 {
-            let item_idx = (mouse.row - 4) as usize;
-            let tasks_len = app.get_kanban_tasks(col_idx).len();
-            if item_idx < tasks_len {
-                app.selected_kanban_card_index = item_idx;
+    Ok(())
+}
+
+fn get_kanban_column_from_mouse(mouse_x: u16, area: ratatui::layout::Rect) -> Option<usize> {
+    let col_width = area.width.saturating_div(3);
+    if col_width == 0 {
+        return None;
+    }
+    let click_x = mouse_x.saturating_sub(area.x);
+    Some((click_x / col_width).min(2) as usize)
+}
+
+fn get_kanban_card_from_mouse(
+    mouse_y: u16,
+    area: ratatui::layout::Rect,
+    tasks_len: usize,
+) -> Option<usize> {
+    let click_y = mouse_y.saturating_sub(area.y);
+    if click_y >= 1 {
+        let item_idx = (click_y - 1) as usize;
+        if item_idx < tasks_len {
+            return Some(item_idx);
+        }
+    }
+    None
+}
+
+async fn handle_kanban_mouse_down(
+    app: &mut App,
+    mouse: event::MouseEvent,
+    area: ratatui::layout::Rect,
+) -> Result<()> {
+    let Some(col_idx) = get_kanban_column_from_mouse(mouse.column, area) else {
+        return Ok(());
+    };
+
+    app.selected_column_index = col_idx;
+
+    let tasks_len = app.get_kanban_tasks(col_idx).len();
+    if let Some(card_idx) = get_kanban_card_from_mouse(mouse.row, area, tasks_len) {
+        app.selected_kanban_card_index = card_idx;
+
+        let tasks = app.get_kanban_tasks(col_idx);
+        if let Some(task) = tasks.get(card_idx) {
+            let task_id = task
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let task_title = task
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Untitled")
+                .to_string();
+
+            if !task_id.is_empty() && !app.show_archived {
+                app.kanban_drag = Some(crate::app::KanbanDragState {
+                    source_column: col_idx,
+                    source_card_index: card_idx,
+                    source_task_id: task_id,
+                    source_task_title: task_title.clone(),
+                    current_hover_column: col_idx,
+                    current_mouse_x: mouse.column,
+                    current_mouse_y: mouse.row,
+                });
+                app.status_message =
+                    format!("Dragging: {} - drop in another column to move", task_title);
             }
         }
     }
+
     Ok(())
+}
+
+fn handle_kanban_mouse_drag(app: &mut App, mouse: event::MouseEvent, area: ratatui::layout::Rect) {
+    if let Some(ref mut drag) = app.kanban_drag {
+        drag.current_mouse_x = mouse.column;
+        drag.current_mouse_y = mouse.row;
+
+        if let Some(col_idx) = get_kanban_column_from_mouse(mouse.column, area)
+            && drag.current_hover_column != col_idx
+        {
+            drag.current_hover_column = col_idx;
+            let target_name = match col_idx {
+                0 => "To Do",
+                1 => "In Progress",
+                2 => "Done",
+                _ => "Unknown",
+            };
+            app.status_message = format!(
+                "Dragging '{}' → Release to move to {}",
+                drag.source_task_title, target_name
+            );
+        }
+    }
+}
+
+async fn handle_kanban_mouse_up(
+    app: &mut App,
+    _mouse: event::MouseEvent,
+    _area: ratatui::layout::Rect,
+) -> Result<()> {
+    let Some(drag) = app.kanban_drag.take() else {
+        return Ok(());
+    };
+
+    if drag.current_hover_column == drag.source_column {
+        app.status_message = "Drag cancelled - same column".to_string();
+        return Ok(());
+    }
+
+    let new_status = match drag.current_hover_column {
+        0 => "todo",
+        1 => "in_progress",
+        2 => "done",
+        _ => return Ok(()),
+    };
+
+    let target_column_name = match drag.current_hover_column {
+        0 => "To Do",
+        1 => "In Progress",
+        2 => "Done",
+        _ => "Unknown",
+    };
+
+    let task_to_update = app
+        .tasks
+        .iter()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(&drag.source_task_id))
+        .cloned();
+
+    let Some(mut task) = task_to_update else {
+        app.status_message = "Task not found".to_string();
+        return Ok(());
+    };
+
+    if let Some(obj) = task.as_object_mut() {
+        obj.insert(
+            "status".to_string(),
+            serde_json::Value::String(new_status.to_string()),
+        );
+    }
+
+    match app.client.task_update(&app.profile_id, task).await {
+        Ok(_) => {
+            app.status_message = format!(
+                "Moved '{}' to {}",
+                drag.source_task_title, target_column_name
+            );
+            app.refresh_tasks().await?;
+
+            app.selected_column_index = drag.current_hover_column;
+            let new_tasks = app.get_kanban_tasks(drag.current_hover_column);
+            if let Some(idx) = new_tasks
+                .iter()
+                .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(&drag.source_task_id))
+            {
+                app.selected_kanban_card_index = idx;
+            } else {
+                app.selected_kanban_card_index = 0;
+            }
+        }
+        Err(e) => {
+            app.status_message = format!("Failed to move task: {}", e);
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_dashboard_mouse(
+    app: &mut App,
+    mouse: event::MouseEvent,
+    area: ratatui::layout::Rect,
+) -> Result<()> {
+    let half_width = area.width / 2;
+    let click_x = mouse.column.saturating_sub(area.x);
+    let click_y = mouse.row.saturating_sub(area.y);
+
+    if click_x < half_width {
+        let left_height = area.height;
+        let timer_height = left_height.saturating_sub(9 + 7);
+        let profiles_start = timer_height;
+        let profiles_height = 9;
+        let stats_start = profiles_start + profiles_height;
+
+        if click_y < timer_height {
+            app.focused_pane = DashboardPane::TimerConfig;
+        } else if click_y >= profiles_start && click_y < stats_start {
+            app.focused_pane = DashboardPane::ProfileList;
+            let row_in_pane = click_y.saturating_sub(profiles_start);
+            if row_in_pane >= 1 {
+                let item_idx = (row_in_pane - 1) as usize;
+                if item_idx < app.profiles.len() {
+                    app.selected_profile_index = item_idx;
+                }
+            }
+        }
+    } else {
+        app.focused_pane = DashboardPane::TasksList;
+        if click_y >= 1 {
+            let item_idx = (click_y - 1) as usize;
+            let filtered_tasks = app.get_filtered_tasks();
+            if item_idx < filtered_tasks.len() {
+                app.selected_task_index = item_idx;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_entries_mouse(app: &mut App, mouse: event::MouseEvent, area: ratatui::layout::Rect) {
+    let click_y = mouse.row.saturating_sub(area.y);
+    if click_y >= 1 {
+        let item_idx = (click_y - 1) as usize;
+        let filtered_entries = app.get_filtered_entries();
+        if item_idx < filtered_entries.len() {
+            app.selected_entry_index = item_idx;
+        }
+    }
+}
+
+fn handle_timers_mouse(app: &mut App, mouse: event::MouseEvent, area: ratatui::layout::Rect) {
+    let list_width = (area.width * 40) / 100;
+    let click_x = mouse.column.saturating_sub(area.x);
+
+    if click_x < list_width {
+        let click_y = mouse.row.saturating_sub(area.y);
+        if click_y >= 1 {
+            let item_idx = (click_y - 1) as usize;
+            if item_idx < app.active_timers.len() {
+                app.selected_timer_index = item_idx;
+            }
+        }
+    }
+}
+
+fn handle_settings_mouse(app: &mut App, mouse: event::MouseEvent, area: ratatui::layout::Rect) {
+    let click_y = mouse.row.saturating_sub(area.y);
+    if click_y >= 1 {
+        let item_idx = (click_y - 1) as usize;
+        if item_idx < crate::app::SettingsItem::ALL.len() {
+            app.selected_setting_index = item_idx;
+        }
+    }
 }
 
 async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> Result<()> {
@@ -440,6 +704,57 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
                 if app.input_mode != InputMode::PomodoroBreakFinished {
                     app.input_mode = InputMode::Normal;
                 }
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    if app.input_mode == InputMode::MoveTask {
+        let profile_count = app.get_move_task_profiles().len();
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.move_task_target_index = app.move_task_target_index.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.move_task_target_index < profile_count.saturating_sub(1) {
+                    app.move_task_target_index += 1;
+                }
+            }
+            KeyCode::Enter => {
+                app.move_selected_task().await?;
+            }
+            KeyCode::Esc => {
+                app.input_mode = InputMode::Normal;
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    if app.input_mode == InputMode::NewEntryTask {
+        let task_count = app.get_tasks_for_entry_selection().len() + 1;
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.new_entry_task_index = app.new_entry_task_index.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.new_entry_task_index < task_count.saturating_sub(1) {
+                    app.new_entry_task_index += 1;
+                }
+            }
+            KeyCode::Char('a') => {
+                app.new_entry_show_archived = !app.new_entry_show_archived;
+                app.new_entry_task_index = 0;
+            }
+            KeyCode::Enter => {
+                app.submit_input().await?;
+            }
+            KeyCode::Esc => {
+                app.new_entry_task_id = None;
+                app.input_mode = InputMode::NewEntryDescription;
+                app.input_buffer.clear();
+                app.status_message = " Description (optional): ".to_string();
             }
             _ => {}
         }
@@ -544,6 +859,10 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             app.refresh_tasks().await?;
         }
         KeyCode::Char('2') => {
+            app.current_view = AppView::Timers;
+            app.refresh_timer().await?;
+        }
+        KeyCode::Char('3') => {
             if app.current_view == AppView::Dashboard {
                 let sync_target = {
                     let filtered = app.get_filtered_tasks();
@@ -580,17 +899,17 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
             app.current_view = AppView::Kanban;
             app.refresh_tasks().await?;
         }
-        KeyCode::Char('3') => {
+        KeyCode::Char('4') => {
             app.current_view = AppView::Entries;
             app.refresh_entries().await?;
         }
-        KeyCode::Char('4') => {
+        KeyCode::Char('5') => {
             app.current_view = AppView::Reports;
             app.refresh_tasks().await?;
             app.refresh_reports().await?;
         }
-        KeyCode::Char('5') => app.current_view = AppView::Settings,
-        KeyCode::Char('6') => {
+        KeyCode::Char('6') => app.current_view = AppView::Settings,
+        KeyCode::Char('7') => {
             app.current_view = AppView::Logs;
             app.refresh_logs().await?;
         }
@@ -600,6 +919,7 @@ async fn handle_key_event(app: &mut App, code: KeyCode, modifiers: KeyModifiers)
 
         _ => match app.current_view {
             AppView::Dashboard => handle_dashboard_keys(app, code, modifiers).await?,
+            AppView::Timers => handle_timers_keys(app, code).await?,
             AppView::Kanban => handle_kanban_keys(app, code, modifiers).await?,
             AppView::Entries => handle_entries_keys(app, code).await?,
             AppView::Reports => handle_reports_keys(app, code).await?,
@@ -792,8 +1112,14 @@ async fn handle_dashboard_keys(
                 app.status_message = "Refreshed!".to_string();
             }
             KeyCode::Char('m') => {
-                app.status_message = "MOOOOO! 🐮".to_string();
-                audio_alert(app);
+                let filtered_tasks = app.get_filtered_tasks();
+                if !filtered_tasks.is_empty() && app.profiles.len() > 1 {
+                    app.input_mode = InputMode::MoveTask;
+                    app.move_task_target_index = 0;
+                    app.status_message = "Move task to profile".to_string();
+                } else if app.profiles.len() <= 1 {
+                    app.status_message = "Need multiple profiles to move tasks".to_string();
+                }
             }
             _ => {}
         },
@@ -944,8 +1270,17 @@ async fn handle_kanban_keys(app: &mut App, code: KeyCode, modifiers: KeyModifier
             }
         }
         KeyCode::Char('m') => {
-            app.status_message = "MOOOOO! 🐮".to_string();
-            audio_alert(app);
+            let tasks = app.get_kanban_tasks(app.selected_column_index);
+            if !tasks.is_empty() && app.profiles.len() > 1 {
+                if let Some(tid) = app.get_selected_kanban_task_id() {
+                    app.sync_kanban_to_task_index(&tid);
+                }
+                app.input_mode = InputMode::MoveTask;
+                app.move_task_target_index = 0;
+                app.status_message = "Move task to profile".to_string();
+            } else if app.profiles.len() <= 1 {
+                app.status_message = "Need multiple profiles to move tasks".to_string();
+            }
         }
         _ => {}
     }
@@ -978,6 +1313,12 @@ async fn handle_entries_keys(app: &mut App, code: KeyCode) -> Result<()> {
             app.input_mode = InputMode::FilterEntries;
             app.input_buffer.clear();
             app.status_message = "Enter search term:".to_string();
+        }
+        KeyCode::Char('n') => {
+            app.input_mode = InputMode::NewEntryStart;
+            app.input_buffer.clear();
+            app.reset_new_entry_state();
+            app.status_message = " Start Time (Enter for 1h ago): ".to_string();
         }
         _ => {}
     }
@@ -1095,6 +1436,48 @@ async fn handle_settings_keys(app: &mut App, code: KeyCode) -> Result<()> {
                 }
                 _ => {}
             }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn handle_timers_keys(app: &mut App, code: KeyCode) -> Result<()> {
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.selected_timer_index = app.selected_timer_index.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.selected_timer_index < app.active_timers.len().saturating_sub(1) {
+                app.selected_timer_index += 1;
+            }
+        }
+        KeyCode::Char('g') => app.selected_timer_index = 0,
+        KeyCode::Char('G') => {
+            app.selected_timer_index = app.active_timers.len().saturating_sub(1);
+        }
+        KeyCode::Char('r') => {
+            app.refresh_timer().await?;
+            app.status_message = "Timers refreshed".to_string();
+        }
+        KeyCode::Char(' ') => {
+            if let Some(timer_id) = app.get_selected_timer_id() {
+                app.toggle_pause_by_id(&timer_id).await?;
+            }
+        }
+        KeyCode::Char('x') => {
+            if let Some(timer_id) = app.get_selected_timer_id() {
+                app.stop_timer_by_id(&timer_id).await?;
+                if app.selected_timer_index >= app.active_timers.len()
+                    && !app.active_timers.is_empty()
+                {
+                    app.selected_timer_index = app.active_timers.len() - 1;
+                }
+            }
+        }
+        KeyCode::Char('m') => {
+            app.status_message = "MOOOOO! 🐮".to_string();
+            audio_alert(app);
         }
         _ => {}
     }

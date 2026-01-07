@@ -76,6 +76,11 @@ impl TimerEngine {
 
     pub async fn timer_id(&self) -> String {
         let timer = self.timer.read().await;
+        timer.id.clone()
+    }
+
+    pub async fn profile_id(&self) -> String {
+        let timer = self.timer.read().await;
         timer.profile_id.clone()
     }
 
@@ -102,7 +107,7 @@ impl TimerEngine {
             let elapsed = timer.current_elapsed();
             let remaining = timer.remaining_seconds();
             let profile_id = timer.profile_id.clone();
-            let timer_id = profile_id.clone();
+            let timer_id = timer.id.clone();
 
             drop(timer);
 
@@ -168,7 +173,7 @@ impl TimerEngine {
             if should_complete {
                 let timer = self.timer.read().await;
                 let countdown_profile = timer.profile_id.clone();
-                let countdown_timer_id = countdown_profile.clone();
+                let countdown_timer_id = timer.id.clone();
                 let Some(target) = timer.target_duration else {
                     drop(timer);
                     continue;
@@ -214,7 +219,7 @@ impl TimerEngine {
                 elapsed_seconds: elapsed,
             },
             timer.profile_id.clone(),
-            timer.profile_id.clone(),
+            timer.id.clone(),
         );
         let _ = self.event_tx.send(event);
 
@@ -228,7 +233,7 @@ impl TimerEngine {
         let event = TimerEvent::new(
             TimerEventType::Resumed,
             timer.profile_id.clone(),
-            timer.profile_id.clone(),
+            timer.id.clone(),
         );
         let _ = self.event_tx.send(event);
 
@@ -249,8 +254,7 @@ impl TimerEngine {
             timer.mode,
         )?;
 
-        let event =
-            TimerEvent::stopped(timer.profile_id.clone(), timer.profile_id.clone(), duration);
+        let event = TimerEvent::stopped(timer.profile_id.clone(), timer.id.clone(), duration);
         let _ = self.event_tx.send(event);
 
         Ok(entry)
@@ -263,7 +267,7 @@ impl TimerEngine {
         let event = TimerEvent::new(
             TimerEventType::Cancelled,
             timer.profile_id.clone(),
-            timer.profile_id.clone(),
+            timer.id.clone(),
         );
         let _ = self.event_tx.send(event);
 

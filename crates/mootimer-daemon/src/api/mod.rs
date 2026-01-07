@@ -126,6 +126,8 @@ impl ApiHandler {
             "timer.stop" => self.handle_timer_stop(params).await,
             "timer.cancel" => self.handle_timer_cancel(params).await,
             "timer.get" => self.handle_timer_get(params).await,
+            "timer.get_by_profile" => self.handle_timer_get_by_profile(params).await,
+            "timer.list_by_profile" => self.handle_timer_list_by_profile(params).await,
             "timer.list" => self.handle_timer_list(params).await,
 
             "profile.create" => self.handle_profile_create(params).await,
@@ -140,9 +142,11 @@ impl ApiHandler {
             "task.update" => self.handle_task_update(params).await,
             "task.delete" => self.handle_task_delete(params).await,
             "task.search" => self.handle_task_search(params).await,
+            "task.move" => self.handle_task_move(params).await,
 
             "entry.list" => self.handle_entry_list(params).await,
             "entry.filter" => self.handle_entry_filter(params).await,
+            "entry.create" => self.handle_entry_create(params).await,
             "entry.delete" => self.handle_entry_delete(params).await,
             "entry.update" => self.handle_entry_update(params).await,
             "entry.today" => self.handle_entry_today(params).await,
@@ -228,6 +232,14 @@ impl ApiHandler {
         timer::get(&self.timer_manager, params).await
     }
 
+    async fn handle_timer_get_by_profile(&self, params: Option<Value>) -> Result<Value> {
+        timer::get_by_profile(&self.timer_manager, params).await
+    }
+
+    async fn handle_timer_list_by_profile(&self, params: Option<Value>) -> Result<Value> {
+        timer::list_by_profile(&self.timer_manager, params).await
+    }
+
     async fn handle_timer_list(&self, params: Option<Value>) -> Result<Value> {
         timer::list(&self.timer_manager, params).await
     }
@@ -276,12 +288,26 @@ impl ApiHandler {
         task::search(&self.task_manager, params).await
     }
 
+    async fn handle_task_move(&self, params: Option<Value>) -> Result<Value> {
+        task::move_task(
+            &self.task_manager,
+            &self.entry_manager,
+            &self.timer_manager,
+            params,
+        )
+        .await
+    }
+
     async fn handle_entry_list(&self, params: Option<Value>) -> Result<Value> {
         entry::list(&self.entry_manager, params).await
     }
 
     async fn handle_entry_filter(&self, params: Option<Value>) -> Result<Value> {
         entry::filter(&self.entry_manager, params).await
+    }
+
+    async fn handle_entry_create(&self, params: Option<Value>) -> Result<Value> {
+        entry::create(&self.entry_manager, &self.task_manager, params).await
     }
 
     async fn handle_entry_delete(&self, params: Option<Value>) -> Result<Value> {
@@ -411,7 +437,15 @@ impl ApiHandler {
     }
 
     pub async fn timer_get(&self, profile_id: &str) -> Result<Value> {
-        timer::get(
+        timer::get_by_profile(
+            &self.timer_manager,
+            Some(json!({ "profile_id": profile_id })),
+        )
+        .await
+    }
+
+    pub async fn timer_list_by_profile(&self, profile_id: &str) -> Result<Value> {
+        timer::list_by_profile(
             &self.timer_manager,
             Some(json!({ "profile_id": profile_id })),
         )
@@ -452,21 +486,54 @@ impl ApiHandler {
         timer::start_countdown(&self.timer_manager, Some(json!({ "profile_id": profile_id, "task_id": task_id, "duration_minutes": duration_minutes }))).await
     }
 
-    pub async fn timer_stop(&self, profile_id: &str) -> Result<Value> {
+    pub async fn timer_stop(&self, timer_id: &str) -> Result<Value> {
         timer::stop(
             &self.timer_manager,
             &self.entry_manager,
             &self.sync_manager,
             &self.config_manager,
-            Some(json!({ "profile_id": profile_id })),
+            Some(json!({ "timer_id": timer_id })),
         )
         .await
+    }
+
+    pub async fn timer_pause(&self, timer_id: &str) -> Result<Value> {
+        timer::pause(&self.timer_manager, Some(json!({ "timer_id": timer_id }))).await
+    }
+
+    pub async fn timer_resume(&self, timer_id: &str) -> Result<Value> {
+        timer::resume(&self.timer_manager, Some(json!({ "timer_id": timer_id }))).await
+    }
+
+    pub async fn timer_cancel(&self, timer_id: &str) -> Result<Value> {
+        timer::cancel(&self.timer_manager, Some(json!({ "timer_id": timer_id }))).await
     }
 
     pub async fn task_get(&self, profile_id: &str, task_id: &str) -> Result<Value> {
         task::get(
             &self.task_manager,
             Some(json!({ "profile_id": profile_id, "task_id": task_id })),
+        )
+        .await
+    }
+
+    pub async fn task_move(
+        &self,
+        source_profile_id: &str,
+        target_profile_id: &str,
+        task_id: &str,
+        move_entries: Option<bool>,
+    ) -> Result<Value> {
+        task::move_task(
+            &self.task_manager,
+            &self.entry_manager,
+            &self.timer_manager,
+            Some(json!({
+                "source_profile_id": source_profile_id,
+                "target_profile_id": target_profile_id,
+                "task_id": task_id,
+                "move_entries": move_entries.unwrap_or(true)
+            })),
         )
         .await
     }

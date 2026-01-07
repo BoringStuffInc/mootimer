@@ -332,6 +332,70 @@ impl EntryManager {
 
         Ok(())
     }
+
+    pub async fn move_entries_for_task(
+        &self,
+        source_profile_id: &str,
+        target_profile_id: &str,
+        task_id: &str,
+    ) -> Result<usize> {
+        let source_entries = self.get_all(source_profile_id).await?;
+
+        let (entries_to_move, entries_to_keep): (Vec<Entry>, Vec<Entry>) = source_entries
+            .into_iter()
+            .partition(|e| e.task_id.as_deref() == Some(task_id));
+
+        if entries_to_move.is_empty() {
+            return Ok(0);
+        }
+
+        let moved_count = entries_to_move.len();
+
+        let data_dir = self.data_dir.clone();
+        let source_id = source_profile_id.to_string();
+        let entries_keep = entries_to_keep.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let storage = EntryStorage::new(data_dir);
+            storage.save_all(&source_id, &entries_keep)
+        })
+        .await
+        .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
+
+        {
+            let mut cache = self.cache.write().await;
+            cache.insert(source_profile_id.to_string(), entries_to_keep);
+        }
+
+        let mut target_entries = self.get_all(target_profile_id).await.unwrap_or_default();
+        target_entries.extend(entries_to_move.clone());
+
+        let data_dir = self.data_dir.clone();
+        let target_id = target_profile_id.to_string();
+        let entries_target = target_entries.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let storage = EntryStorage::new(data_dir);
+            storage.save_all(&target_id, &entries_target)
+        })
+        .await
+        .map_err(|e| EntryManagerError::JoinError(e.to_string()))??;
+
+        {
+            let mut cache = self.cache.write().await;
+            cache.insert(target_profile_id.to_string(), target_entries);
+        }
+
+        for entry in &entries_to_move {
+            let event = EntryEvent::deleted(source_profile_id.to_string(), entry.id.clone());
+            self.event_manager.emit_entry(event);
+
+            let event = EntryEvent::added(target_profile_id.to_string(), entry.clone());
+            self.event_manager.emit_entry(event);
+        }
+
+        Ok(moved_count)
+    }
 }
 
 impl Default for EntryManager {
@@ -442,5 +506,68 @@ mod tests {
         assert_eq!(stats.pomodoro_count, 1);
         assert_eq!(stats.manual_count, 1);
         assert_eq!(stats.total_duration_seconds, 3600 + 7200);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_move_entries_for_task() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
+        let source_profile = "source_profile";
+        let target_profile = "target_profile";
+        let task_id = "task_to_move";
+
+        let entry1 = Entry::new(
+            Some(task_id.to_string()),
+            Some("Task".to_string()),
+            TimerMode::Manual,
+        );
+        let entry2 = Entry::new(
+            Some(task_id.to_string()),
+            Some("Task".to_string()),
+            TimerMode::Manual,
+        );
+        let entry3 = Entry::new(
+            Some("other_task".to_string()),
+            Some("Other".to_string()),
+            TimerMode::Manual,
+        );
+
+        manager.add(source_profile, entry1).await.unwrap();
+        manager.add(source_profile, entry2).await.unwrap();
+        manager.add(source_profile, entry3).await.unwrap();
+
+        let moved_count = manager
+            .move_entries_for_task(source_profile, target_profile, task_id)
+            .await
+            .unwrap();
+
+        assert_eq!(moved_count, 2);
+
+        let source_entries = manager.get_all(source_profile).await.unwrap();
+        assert_eq!(source_entries.len(), 1);
+        assert_eq!(source_entries[0].task_id, Some("other_task".to_string()));
+
+        let target_entries = manager.get_all(target_profile).await.unwrap();
+        assert_eq!(target_entries.len(), 2);
+        assert!(
+            target_entries
+                .iter()
+                .all(|e| e.task_id.as_deref() == Some(task_id))
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_move_entries_for_task_no_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = create_manager(&temp_dir);
+
+        let moved_count = manager
+            .move_entries_for_task("source", "target", "nonexistent_task")
+            .await
+            .unwrap();
+
+        assert_eq!(moved_count, 0);
     }
 }

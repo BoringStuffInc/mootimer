@@ -124,7 +124,7 @@ pub fn draw_entries(f: &mut Frame, app: &App, area: Rect) {
         )
     };
 
-    let bottom_hint = " [d]ay [w]eek [m]onth | [e]dit [f]ilter [del]ete ";
+    let bottom_hint = " [n]ew | [d]ay [w]eek [m]onth | [e]dit [f]ilter [del]ete ";
 
     let entries_list = List::new(entry_items).block(
         Block::default()

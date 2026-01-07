@@ -283,49 +283,50 @@ impl MooTimerClient {
         .await
     }
 
-    pub async fn timer_pause(&self, profile_id: &str) -> Result<Value> {
+    pub async fn timer_pause(&self, timer_id: &str) -> Result<Value> {
         self.call(
             "timer.pause",
             Some(serde_json::json!({
-                "profile_id": profile_id,
+                "timer_id": timer_id,
             })),
         )
         .await
     }
 
-    pub async fn timer_resume(&self, profile_id: &str) -> Result<Value> {
+    pub async fn timer_resume(&self, timer_id: &str) -> Result<Value> {
         self.call(
             "timer.resume",
             Some(serde_json::json!({
-                "profile_id": profile_id,
+                "timer_id": timer_id,
             })),
         )
         .await
     }
 
-    pub async fn timer_stop(&self, profile_id: &str) -> Result<Value> {
+    pub async fn timer_stop(&self, timer_id: &str) -> Result<Value> {
         self.call(
             "timer.stop",
             Some(serde_json::json!({
-                "profile_id": profile_id,
+                "timer_id": timer_id,
             })),
         )
         .await
     }
 
-    pub async fn timer_cancel(&self, profile_id: &str) -> Result<Value> {
+    pub async fn timer_cancel(&self, timer_id: &str) -> Result<Value> {
         self.call(
             "timer.cancel",
             Some(serde_json::json!({
-                "profile_id": profile_id,
+                "timer_id": timer_id,
             })),
         )
         .await
     }
 
+    /// Get first timer for a profile (backward compatible convenience method)
     pub async fn timer_get(&self, profile_id: &str) -> Result<Value> {
         self.call(
-            "timer.get",
+            "timer.get_by_profile",
             Some(serde_json::json!({
                 "profile_id": profile_id,
             })),
@@ -333,6 +334,29 @@ impl MooTimerClient {
         .await
     }
 
+    /// Get a specific timer by its ID
+    pub async fn timer_get_by_id(&self, timer_id: &str) -> Result<Value> {
+        self.call(
+            "timer.get",
+            Some(serde_json::json!({
+                "timer_id": timer_id,
+            })),
+        )
+        .await
+    }
+
+    /// List all timers for a specific profile
+    pub async fn timer_list_by_profile(&self, profile_id: &str) -> Result<Value> {
+        self.call(
+            "timer.list_by_profile",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+            })),
+        )
+        .await
+    }
+
+    /// List all active timers across all profiles
     pub async fn timer_list(&self) -> Result<Value> {
         self.call("timer.list", None).await
     }
@@ -448,6 +472,25 @@ impl MooTimerClient {
         .await
     }
 
+    pub async fn task_move(
+        &self,
+        source_profile_id: &str,
+        target_profile_id: &str,
+        task_id: &str,
+        move_entries: Option<bool>,
+    ) -> Result<Value> {
+        self.call(
+            "task.move",
+            Some(serde_json::json!({
+                "source_profile_id": source_profile_id,
+                "target_profile_id": target_profile_id,
+                "task_id": task_id,
+                "move_entries": move_entries.unwrap_or(true),
+            })),
+        )
+        .await
+    }
+
     pub async fn entry_list(&self, profile_id: &str) -> Result<Value> {
         self.call(
             "entry.list",
@@ -516,6 +559,27 @@ impl MooTimerClient {
             Some(serde_json::json!({
                 "profile_id": profile_id,
                 "entry": entry,
+            })),
+        )
+        .await
+    }
+
+    pub async fn entry_create(
+        &self,
+        profile_id: &str,
+        start_time: &str,
+        end_time: &str,
+        task_id: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<Value> {
+        self.call(
+            "entry.create",
+            Some(serde_json::json!({
+                "profile_id": profile_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "task_id": task_id,
+                "description": description,
             })),
         )
         .await

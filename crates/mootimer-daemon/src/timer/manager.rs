@@ -13,9 +13,6 @@ pub enum TimerManagerError {
     #[error("Timer not found: {0}")]
     NotFound(String),
 
-    #[error("Profile already has active timer")]
-    ProfileHasActiveTimer,
-
     #[error("Timer engine error: {0}")]
     Engine(#[from] TimerEngineError),
 }
@@ -77,15 +74,20 @@ impl TimerManager {
     async fn handle_countdown_completion(
         timers: Arc<RwLock<HashMap<String, Arc<TimerEngine>>>>,
         completed_entries: Arc<RwLock<Vec<(String, Entry)>>>,
+        timer_id: String,
         profile_id: String,
     ) {
-        tracing::info!("handle_countdown_completion called for {}", profile_id);
+        tracing::info!(
+            "handle_countdown_completion called for timer {} (profile {})",
+            timer_id,
+            profile_id
+        );
 
         tracing::debug!("Acquiring write lock on timers HashMap");
         let engine = {
             let mut timers_lock = timers.write().await;
             tracing::debug!("Got write lock on timers HashMap");
-            timers_lock.remove(&profile_id)
+            timers_lock.remove(&timer_id)
         };
         tracing::debug!("Released write lock on timers HashMap");
 
@@ -101,7 +103,8 @@ impl TimerManager {
                 timer.mode,
             ) {
                 tracing::info!(
-                    "Countdown completed for profile {}, creating entry",
+                    "Countdown completed for timer {} (profile {}), creating entry",
+                    timer_id,
                     profile_id
                 );
                 tracing::debug!("Acquiring write lock on completed_entries");
@@ -110,7 +113,10 @@ impl TimerManager {
                 entries.push((profile_id, entry));
             }
         }
-        tracing::info!("handle_countdown_completion finished for profile");
+        tracing::info!(
+            "handle_countdown_completion finished for timer {}",
+            timer_id
+        );
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<TimerEvent> {
@@ -122,13 +128,6 @@ impl TimerManager {
         profile_id: String,
         task_id: Option<String>,
     ) -> Result<String> {
-        {
-            let timers = self.timers.read().await;
-            if timers.contains_key(&profile_id) {
-                return Err(TimerManagerError::ProfileHasActiveTimer);
-            }
-        }
-
         let task_title = self.get_task_title(&profile_id, task_id.as_ref()).await;
 
         let engine = Arc::new(TimerEngine::new_manual(
@@ -141,7 +140,7 @@ impl TimerManager {
         let timer_id = engine.timer_id().await;
 
         let event = TimerEvent::started(
-            profile_id.clone(),
+            profile_id,
             timer_id.clone(),
             task_id,
             mootimer_core::models::TimerMode::Manual,
@@ -156,7 +155,7 @@ impl TimerManager {
 
         {
             let mut timers = self.timers.write().await;
-            timers.insert(profile_id, engine);
+            timers.insert(timer_id.clone(), engine);
         }
 
         Ok(timer_id)
@@ -168,13 +167,6 @@ impl TimerManager {
         task_id: Option<String>,
         config: PomodoroConfig,
     ) -> Result<String> {
-        {
-            let timers = self.timers.read().await;
-            if timers.contains_key(&profile_id) {
-                return Err(TimerManagerError::ProfileHasActiveTimer);
-            }
-        }
-
         let task_title = self.get_task_title(&profile_id, task_id.as_ref()).await;
 
         let engine = Arc::new(TimerEngine::new_pomodoro(
@@ -188,7 +180,7 @@ impl TimerManager {
         let timer_id = engine.timer_id().await;
 
         let event = TimerEvent::started(
-            profile_id.clone(),
+            profile_id,
             timer_id.clone(),
             task_id,
             mootimer_core::models::TimerMode::Pomodoro,
@@ -203,7 +195,7 @@ impl TimerManager {
 
         {
             let mut timers = self.timers.write().await;
-            timers.insert(profile_id, engine);
+            timers.insert(timer_id.clone(), engine);
         }
 
         Ok(timer_id)
@@ -215,13 +207,6 @@ impl TimerManager {
         task_id: Option<String>,
         duration_minutes: u64,
     ) -> Result<String> {
-        {
-            let timers = self.timers.read().await;
-            if timers.contains_key(&profile_id) {
-                return Err(TimerManagerError::ProfileHasActiveTimer);
-            }
-        }
-
         let task_title = self.get_task_title(&profile_id, task_id.as_ref()).await;
 
         let engine = Arc::new(TimerEngine::new_countdown(
@@ -246,12 +231,14 @@ impl TimerManager {
         let engine_clone = engine.clone();
         let timers_clone = self.timers.clone();
         let completed_entries_clone = self.completed_entries.clone();
-        let profile_id_clone = profile_id.clone();
+        let timer_id_clone = timer_id.clone();
+        let profile_id_clone = profile_id;
         tokio::spawn(async move {
             engine_clone.start_tick_loop().await;
             Self::handle_countdown_completion(
                 timers_clone,
                 completed_entries_clone,
+                timer_id_clone,
                 profile_id_clone,
             )
             .await;
@@ -259,26 +246,61 @@ impl TimerManager {
 
         {
             let mut timers = self.timers.write().await;
-            timers.insert(profile_id, engine);
+            timers.insert(timer_id.clone(), engine);
         }
 
         Ok(timer_id)
     }
 
-    pub async fn get_timer(&self, profile_id: &str) -> Result<ActiveTimer> {
+    pub async fn get_timer(&self, timer_id: &str) -> Result<ActiveTimer> {
         tracing::debug!("get_timer: acquiring read lock on timers HashMap");
         let engine = {
             let timers = self.timers.read().await;
             tracing::debug!("get_timer: got read lock on timers HashMap");
             timers
-                .get(profile_id)
+                .get(timer_id)
                 .cloned()
-                .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
+                .ok_or_else(|| TimerManagerError::NotFound(timer_id.to_string()))?
         };
         tracing::debug!("get_timer: released read lock, calling engine.get_timer()");
         let result = engine.get_timer().await;
         tracing::debug!("get_timer: engine.get_timer() returned");
         Ok(result)
+    }
+
+    pub async fn get_timer_by_profile(&self, profile_id: &str) -> Result<ActiveTimer> {
+        let engines: Vec<_> = {
+            let timers = self.timers.read().await;
+            timers.values().cloned().collect()
+        };
+
+        for engine in engines {
+            let timer = engine.get_timer().await;
+            if timer.profile_id == profile_id {
+                return Ok(timer);
+            }
+        }
+
+        Err(TimerManagerError::NotFound(format!(
+            "No timer for profile: {}",
+            profile_id
+        )))
+    }
+
+    pub async fn get_timers_by_profile(&self, profile_id: &str) -> Vec<ActiveTimer> {
+        let engines: Vec<_> = {
+            let timers = self.timers.read().await;
+            timers.values().cloned().collect()
+        };
+
+        let mut result = Vec::new();
+        for engine in engines {
+            let timer = engine.get_timer().await;
+            if timer.profile_id == profile_id {
+                result.push(timer);
+            }
+        }
+        result
     }
 
     pub async fn get_all_timers(&self) -> HashMap<String, ActiveTimer> {
@@ -287,84 +309,89 @@ impl TimerManager {
             timers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
         let mut result = HashMap::new();
-        for (profile_id, engine) in engines {
-            result.insert(profile_id, engine.get_timer().await);
+        for (timer_id, engine) in engines {
+            result.insert(timer_id, engine.get_timer().await);
         }
 
         result
     }
 
-    pub async fn pause(&self, profile_id: &str) -> Result<()> {
+    pub async fn pause(&self, timer_id: &str) -> Result<()> {
         let engine = {
             let timers = self.timers.read().await;
             timers
-                .get(profile_id)
+                .get(timer_id)
                 .cloned()
-                .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
+                .ok_or_else(|| TimerManagerError::NotFound(timer_id.to_string()))?
         };
         engine.pause().await?;
         Ok(())
     }
 
-    pub async fn resume(&self, profile_id: &str) -> Result<()> {
+    pub async fn resume(&self, timer_id: &str) -> Result<()> {
         let engine = {
             let timers = self.timers.read().await;
             timers
-                .get(profile_id)
+                .get(timer_id)
                 .cloned()
-                .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
+                .ok_or_else(|| TimerManagerError::NotFound(timer_id.to_string()))?
         };
         engine.resume().await?;
         Ok(())
     }
 
-    pub async fn stop(&self, profile_id: &str) -> Result<Entry> {
+    pub async fn stop(&self, timer_id: &str) -> Result<(String, Entry)> {
         let engine = {
             let mut timers = self.timers.write().await;
             timers
-                .remove(profile_id)
-                .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
+                .remove(timer_id)
+                .ok_or_else(|| TimerManagerError::NotFound(timer_id.to_string()))?
         };
 
+        let profile_id = engine.profile_id().await;
         let entry = engine.stop().await?;
-        Ok(entry)
+        Ok((profile_id, entry))
     }
 
     pub async fn stop_all(&self) -> Vec<(String, Entry)> {
         let mut completed = Vec::new();
-        let profiles: Vec<String> = {
+        let timer_ids: Vec<String> = {
             let timers = self.timers.read().await;
             timers.keys().cloned().collect()
         };
 
-        for profile_id in profiles {
-            if let Ok(entry) = self.stop(&profile_id).await {
+        for timer_id in timer_ids {
+            if let Ok((profile_id, entry)) = self.stop(&timer_id).await {
                 completed.push((profile_id, entry));
             }
         }
         completed
     }
 
-    pub async fn cancel(&self, profile_id: &str) -> Result<()> {
+    pub async fn cancel(&self, timer_id: &str) -> Result<()> {
         let engine = {
             let mut timers = self.timers.write().await;
             timers
-                .remove(profile_id)
-                .ok_or_else(|| TimerManagerError::NotFound(profile_id.to_string()))?
+                .remove(timer_id)
+                .ok_or_else(|| TimerManagerError::NotFound(timer_id.to_string()))?
         };
 
         engine.cancel().await?;
         Ok(())
     }
 
-    pub async fn has_active_timer(&self, profile_id: &str) -> bool {
+    pub async fn has_timer(&self, timer_id: &str) -> bool {
         let timers = self.timers.read().await;
-        timers.contains_key(profile_id)
+        timers.contains_key(timer_id)
     }
 
     pub async fn active_timer_count(&self) -> usize {
         let timers = self.timers.read().await;
         timers.len()
+    }
+
+    pub async fn active_timer_count_by_profile(&self, profile_id: &str) -> usize {
+        self.get_timers_by_profile(profile_id).await.len()
     }
 }
 
@@ -395,38 +422,44 @@ mod tests {
             .unwrap();
 
         assert!(!timer_id.is_empty());
-        assert!(manager.has_active_timer("profile1").await);
+        assert!(manager.has_timer(&timer_id).await);
         assert_eq!(manager.active_timer_count().await, 1);
     }
 
     #[tokio::test]
-    async fn test_cannot_start_multiple_timers_for_profile() {
+    async fn test_can_start_multiple_timers_for_profile() {
         let manager = create_manager();
 
-        manager
+        let timer1 = manager
             .start_manual("profile1".to_string(), None)
             .await
             .unwrap();
 
-        let result = manager.start_manual("profile1".to_string(), None).await;
-        assert!(result.is_err());
+        let timer2 = manager
+            .start_manual("profile1".to_string(), None)
+            .await
+            .unwrap();
+
+        assert_ne!(timer1, timer2);
+        assert_eq!(manager.active_timer_count().await, 2);
+        assert_eq!(manager.active_timer_count_by_profile("profile1").await, 2);
     }
 
     #[tokio::test]
     async fn test_pause_resume() {
         let manager = create_manager();
 
-        manager
+        let timer_id = manager
             .start_manual("profile1".to_string(), None)
             .await
             .unwrap();
 
-        manager.pause("profile1").await.unwrap();
-        let timer = manager.get_timer("profile1").await.unwrap();
+        manager.pause(&timer_id).await.unwrap();
+        let timer = manager.get_timer(&timer_id).await.unwrap();
         assert!(timer.is_paused());
 
-        manager.resume("profile1").await.unwrap();
-        let timer = manager.get_timer("profile1").await.unwrap();
+        manager.resume(&timer_id).await.unwrap();
+        let timer = manager.get_timer(&timer_id).await.unwrap();
         assert!(timer.is_running());
     }
 
@@ -434,27 +467,28 @@ mod tests {
     async fn test_stop_removes_timer() {
         let manager = create_manager();
 
-        manager
+        let timer_id = manager
             .start_manual("profile1".to_string(), Some("task1".to_string()))
             .await
             .unwrap();
 
         sleep(Duration::from_millis(100)).await;
 
-        let entry = manager.stop("profile1").await.unwrap();
+        let (profile_id, entry) = manager.stop(&timer_id).await.unwrap();
+        assert_eq!(profile_id, "profile1");
         assert!(entry.is_completed());
-        assert!(!manager.has_active_timer("profile1").await);
+        assert!(!manager.has_timer(&timer_id).await);
     }
 
     #[tokio::test]
     async fn test_multiple_profiles() {
         let manager = create_manager();
 
-        manager
+        let timer1 = manager
             .start_manual("profile1".to_string(), None)
             .await
             .unwrap();
-        manager
+        let timer2 = manager
             .start_manual("profile2".to_string(), None)
             .await
             .unwrap();
@@ -463,8 +497,8 @@ mod tests {
 
         let timers = manager.get_all_timers().await;
         assert_eq!(timers.len(), 2);
-        assert!(timers.contains_key("profile1"));
-        assert!(timers.contains_key("profile2"));
+        assert!(timers.contains_key(&timer1));
+        assert!(timers.contains_key(&timer2));
     }
 
     #[tokio::test]
@@ -491,13 +525,37 @@ mod tests {
         let manager = create_manager();
         let config = PomodoroConfig::default();
 
-        manager
+        let timer_id = manager
             .start_pomodoro("profile1".to_string(), None, config)
             .await
             .unwrap();
 
-        let timer = manager.get_timer("profile1").await.unwrap();
+        let timer = manager.get_timer(&timer_id).await.unwrap();
         assert!(timer.is_pomodoro());
+    }
+
+    #[tokio::test]
+    async fn test_get_timers_by_profile() {
+        let manager = create_manager();
+
+        manager
+            .start_manual("profile1".to_string(), None)
+            .await
+            .unwrap();
+        manager
+            .start_manual("profile1".to_string(), None)
+            .await
+            .unwrap();
+        manager
+            .start_manual("profile2".to_string(), None)
+            .await
+            .unwrap();
+
+        let p1_timers = manager.get_timers_by_profile("profile1").await;
+        let p2_timers = manager.get_timers_by_profile("profile2").await;
+
+        assert_eq!(p1_timers.len(), 2);
+        assert_eq!(p2_timers.len(), 1);
     }
 
     #[tokio::test]
@@ -506,7 +564,7 @@ mod tests {
         let mut rx = manager.subscribe();
 
         let _start_time = chrono::Utc::now();
-        manager
+        let timer_id = manager
             .start_countdown("profile1".to_string(), None, 1)
             .await
             .unwrap();
@@ -536,7 +594,7 @@ mod tests {
         }
 
         sleep(Duration::from_millis(500)).await;
-        let result = manager.get_timer("profile1").await;
+        let result = manager.get_timer(&timer_id).await;
 
         if countdown_completed && timer_stopped {
             assert!(

@@ -165,6 +165,21 @@ impl McpServer {
                     }
                 },
                 {
+                    "name": "create_entry",
+                    "description": "Create a time entry manually (retroactively). Useful when you forgot to start a timer.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "profile_id": { "type": "string", "description": "The profile to add the entry to." },
+                            "start_time": { "type": "string", "description": "Start time in ISO 8601 format." },
+                            "end_time": { "type": "string", "description": "End time in ISO 8601 format." },
+                            "task_id": { "type": "string", "description": "Optional task ID to associate with the entry." },
+                            "description": { "type": "string", "description": "Optional description for the entry." }
+                        },
+                        "required": ["profile_id", "start_time", "end_time"]
+                    }
+                },
+                {
                     "name": "delete_entry",
                     "description": "Delete a time entry.",
                     "inputSchema": {
@@ -176,10 +191,31 @@ impl McpServer {
                         "required": ["profile_id", "entry_id"]
                     }
                 },
-                { "name": "get_timer_status", "description": "Get the status of the timer for a specific profile.", "inputSchema": { "type": "object", "properties": { "profile_id": { "type": "string" } }, "required": ["profile_id"] } },
+                {
+                    "name": "get_timer_status",
+                    "description": "Get the status of a specific timer by ID.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "timer_id": { "type": "string", "description": "The timer ID to get status for." }
+                        },
+                        "required": ["timer_id"]
+                    }
+                },
+                {
+                    "name": "list_timers",
+                    "description": "List all active timers for a profile. Multiple timers can run in parallel.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "profile_id": { "type": "string", "description": "The profile ID to list timers for." }
+                        },
+                        "required": ["profile_id"]
+                    }
+                },
                 {
                     "name": "start_timer",
-                    "description": "Start a simple manual (stopwatch) timer.",
+                    "description": "Start a simple manual (stopwatch) timer. Returns a timer_id for managing this timer.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -191,7 +227,7 @@ impl McpServer {
                 },
                 {
                     "name": "start_pomodoro_timer",
-                    "description": "Start a standard Pomodoro timer (25m work).",
+                    "description": "Start a standard Pomodoro timer (25m work). Returns a timer_id for managing this timer.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -203,7 +239,7 @@ impl McpServer {
                 },
                 {
                     "name": "start_countdown_timer",
-                    "description": "Start a countdown timer for a specific number of minutes.",
+                    "description": "Start a countdown timer for a specific number of minutes. Returns a timer_id for managing this timer.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -214,7 +250,31 @@ impl McpServer {
                         "required": ["profile_id", "duration_minutes"]
                     }
                 },
-                { "name": "stop_timer", "description": "Stops the currently running timer, saving the time entry.", "inputSchema": { "type": "object", "properties": { "profile_id": { "type": "string" } }, "required": ["profile_id"] } }
+                {
+                    "name": "stop_timer",
+                    "description": "Stops a timer by ID, saving the time entry.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "timer_id": { "type": "string", "description": "The timer ID to stop." }
+                        },
+                        "required": ["timer_id"]
+                    }
+                },
+                {
+                    "name": "move_task",
+                    "description": "Move a task from one profile to another. Also moves associated time entries by default. Fails if task has an active timer.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "source_profile_id": { "type": "string", "description": "Profile ID to move from." },
+                            "target_profile_id": { "type": "string", "description": "Profile ID to move to." },
+                            "task_id": { "type": "string", "description": "The task ID to move." },
+                            "move_entries": { "type": "boolean", "description": "Also move time entries (default: true)." }
+                        },
+                        "required": ["source_profile_id", "target_profile_id", "task_id"]
+                    }
+                }
             ]
         }))
     }
@@ -305,14 +365,28 @@ impl McpServer {
                     .clone();
                 self.client.entry_update(profile_id, entry).await
             }
+            "create_entry" => {
+                let profile_id = get_string_arg(&args, "profile_id")?;
+                let start_time = get_string_arg(&args, "start_time")?;
+                let end_time = get_string_arg(&args, "end_time")?;
+                let task_id = args.get("task_id").and_then(|v| v.as_str());
+                let description = args.get("description").and_then(|v| v.as_str());
+                self.client
+                    .entry_create(profile_id, start_time, end_time, task_id, description)
+                    .await
+            }
             "delete_entry" => {
                 let profile_id = get_string_arg(&args, "profile_id")?;
                 let entry_id = get_string_arg(&args, "entry_id")?;
                 self.client.entry_delete(profile_id, entry_id).await
             }
             "get_timer_status" => {
+                let timer_id = get_string_arg(&args, "timer_id")?;
+                self.client.timer_get_by_id(timer_id).await
+            }
+            "list_timers" => {
                 let profile_id = get_string_arg(&args, "profile_id")?;
-                self.client.timer_get(profile_id).await
+                self.client.timer_list_by_profile(profile_id).await
             }
             "start_timer" => {
                 let profile_id = get_string_arg(&args, "profile_id")?;
@@ -342,8 +416,17 @@ impl McpServer {
                     .await
             }
             "stop_timer" => {
-                let profile_id = get_string_arg(&args, "profile_id")?;
-                self.client.timer_stop(profile_id).await
+                let timer_id = get_string_arg(&args, "timer_id")?;
+                self.client.timer_stop(timer_id).await
+            }
+            "move_task" => {
+                let source_profile_id = get_string_arg(&args, "source_profile_id")?;
+                let target_profile_id = get_string_arg(&args, "target_profile_id")?;
+                let task_id = get_string_arg(&args, "task_id")?;
+                let move_entries = args.get("move_entries").and_then(|v| v.as_bool());
+                self.client
+                    .task_move(source_profile_id, target_profile_id, task_id, move_entries)
+                    .await
             }
             _ => {
                 return Err(JsonRpcError {

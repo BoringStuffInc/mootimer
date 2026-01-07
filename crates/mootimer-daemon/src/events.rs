@@ -27,7 +27,14 @@ pub struct TaskEvent {
 pub enum TaskEventType {
     Created,
     Updated,
-    Deleted { task_id: String },
+    Deleted {
+        task_id: String,
+    },
+    Moved {
+        source_profile_id: String,
+        target_profile_id: String,
+        entries_moved: usize,
+    },
 }
 
 impl TaskEvent {
@@ -54,6 +61,24 @@ impl TaskEvent {
             event_type: TaskEventType::Deleted { task_id },
             profile_id,
             task: None,
+            timestamp: Utc::now(),
+        }
+    }
+
+    pub fn moved(
+        source_profile_id: String,
+        target_profile_id: String,
+        task: Task,
+        entries_moved: usize,
+    ) -> Self {
+        Self {
+            event_type: TaskEventType::Moved {
+                source_profile_id,
+                target_profile_id: target_profile_id.clone(),
+                entries_moved,
+            },
+            profile_id: target_profile_id,
+            task: Some(task),
             timestamp: Utc::now(),
         }
     }

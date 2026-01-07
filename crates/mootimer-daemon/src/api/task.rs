@@ -3,7 +3,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{ApiError, Result};
+use crate::entry::EntryManager;
 use crate::task::TaskManager;
+use crate::timer::TimerManager;
 use mootimer_core::models::Task;
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +37,14 @@ struct UpdateTaskParams {
 struct SearchTasksParams {
     profile_id: String,
     query: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MoveTaskParams {
+    source_profile_id: String,
+    target_profile_id: String,
+    task_id: String,
+    move_entries: Option<bool>,
 }
 
 pub async fn create(manager: &Arc<TaskManager>, params: Option<Value>) -> Result<Value> {
@@ -127,6 +137,37 @@ pub async fn search(manager: &Arc<TaskManager>, params: Option<Value>) -> Result
         .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
 
     Ok(serde_json::to_value(&tasks)?)
+}
+
+pub async fn move_task(
+    task_manager: &Arc<TaskManager>,
+    entry_manager: &Arc<EntryManager>,
+    timer_manager: &Arc<TimerManager>,
+    params: Option<Value>,
+) -> Result<Value> {
+    let params: MoveTaskParams = serde_json::from_value(
+        params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
+    )?;
+
+    let move_entries = params.move_entries.unwrap_or(true);
+
+    let (task, entries_moved) = task_manager
+        .move_task(
+            &params.source_profile_id,
+            &params.target_profile_id,
+            &params.task_id,
+            move_entries,
+            entry_manager,
+            timer_manager,
+        )
+        .await
+        .map_err(|e| ApiError::InvalidParams(e.to_string()))?;
+
+    Ok(json!({
+        "status": "moved",
+        "task": task,
+        "entries_moved": entries_moved
+    }))
 }
 
 #[cfg(test)]

@@ -83,9 +83,13 @@ async fn test_rpc_crud_operations() -> Result<()> {
     assert!(get_res.is_err(), "Task should be deleted");
 
     println!("Testing Entry...");
-    client.timer_start_manual("test-profile", None).await?;
+    let start_res = client.timer_start_manual("test-profile", None).await?;
+    let timer_id = start_res["timer_id"]
+        .as_str()
+        .expect("Timer ID should be string")
+        .to_string();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let stop_res = client.timer_stop("test-profile").await?;
+    let stop_res = client.timer_stop(&timer_id).await?;
     let entry_id = stop_res["id"].as_str().expect("Entry ID").to_string();
 
     let entries = client.entry_list("test-profile").await?;

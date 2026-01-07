@@ -68,10 +68,11 @@ fn draw_timer_with_config(f: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Fill(1),
             Constraint::Length(3),
             Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .split(inner_area);
 
-    let (main_area, button_area, gauge_area) = (pane_chunks[0], pane_chunks[1], pane_chunks[2]);
+    let (main_area, button_area, gauge_area) = (pane_chunks[0], pane_chunks[1], pane_chunks[3]);
 
     let animation_type = get_animation_type(&active_timer);
     let (info_area, animation_area) = split_for_animation(main_area, animation_type.is_some());

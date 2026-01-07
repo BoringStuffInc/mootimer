@@ -1,6 +1,7 @@
 use crate::ui::cow::CowState;
 use crate::ui::tomato::TomatoState;
 use anyhow::Result;
+use chrono::{DateTime, Local, NaiveTime, Utc};
 use mootimer_client::MooTimerClient;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -9,6 +10,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppView {
     Dashboard,
+    Timers,
     Kanban,
     Entries,
     Reports,
@@ -42,6 +44,11 @@ pub enum InputMode {
     EditEntryDuration,
     ConfirmQuit,
     PomodoroBreakFinished,
+    MoveTask,
+    NewEntryStart,
+    NewEntryEnd,
+    NewEntryTask,
+    NewEntryDescription,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +78,17 @@ impl SettingsItem {
     ];
 }
 
+#[derive(Debug, Clone)]
+pub struct KanbanDragState {
+    pub source_column: usize,
+    pub source_card_index: usize,
+    pub source_task_id: String,
+    pub source_task_title: String,
+    pub current_hover_column: usize,
+    pub current_mouse_x: u16,
+    pub current_mouse_y: u16,
+}
+
 pub struct App {
     pub client: MooTimerClient,
     pub profile_id: String,
@@ -89,6 +107,8 @@ pub struct App {
     pub selected_setting_index: usize,
 
     pub timer_info: Option<Value>,
+    pub active_timers: Vec<Value>,
+    pub selected_timer_index: usize,
     pub stats_today: Option<Value>,
     pub tasks: Vec<Value>,
     pub entries: Vec<Value>,
@@ -122,6 +142,15 @@ pub struct App {
     pub tomato_state: TomatoState,
     pub cow_state: CowState,
     pub selected_timer_button: usize,
+    pub move_task_target_index: usize,
+
+    pub new_entry_start: Option<String>,
+    pub new_entry_end: Option<String>,
+    pub new_entry_task_id: Option<String>,
+    pub new_entry_task_index: usize,
+    pub new_entry_show_archived: bool,
+
+    pub kanban_drag: Option<KanbanDragState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +180,8 @@ impl App {
             selected_setting_index: 0,
 
             timer_info: None,
+            active_timers: Vec::new(),
+            selected_timer_index: 0,
             stats_today: None,
             tasks: Vec::new(),
             entries: Vec::new(),
@@ -183,6 +214,15 @@ impl App {
             tomato_state: TomatoState::new(),
             cow_state: CowState::new(),
             selected_timer_button: 0,
+            move_task_target_index: 0,
+
+            new_entry_start: None,
+            new_entry_end: None,
+            new_entry_task_id: None,
+            new_entry_task_index: 0,
+            new_entry_show_archived: false,
+
+            kanban_drag: None,
         }
     }
 
@@ -467,8 +507,25 @@ impl App {
     }
 
     pub async fn refresh_timer(&mut self) -> Result<()> {
+        // Get single "primary" timer for dashboard (backward compat)
         self.timer_info = self.client.timer_get(&self.profile_id).await.ok();
+
+        // Get all timers for this profile for the Timers tab
+        if let Ok(timers) = self.client.timer_list_by_profile(&self.profile_id).await {
+            self.active_timers = timers.as_array().cloned().unwrap_or_default();
+        }
         Ok(())
+    }
+
+    pub fn get_selected_timer(&self) -> Option<&Value> {
+        self.active_timers.get(self.selected_timer_index)
+    }
+
+    pub fn get_selected_timer_id(&self) -> Option<String> {
+        self.get_selected_timer()
+            .and_then(|t| t.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     }
 
     pub async fn refresh_stats(&mut self) -> Result<()> {
@@ -827,11 +884,20 @@ impl App {
     pub async fn toggle_pause(&mut self) -> Result<()> {
         if let Some(timer) = &self.timer_info {
             let state = timer.get("state").and_then(|v| v.as_str()).unwrap_or("");
+            let timer_id = timer
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let Some(timer_id) = timer_id else {
+                self.status_message = "No timer ID found".to_string();
+                return Ok(());
+            };
 
             let result = if state == "paused" {
-                self.client.timer_resume(&self.profile_id).await
+                self.client.timer_resume(&timer_id).await
             } else if state == "running" {
-                self.client.timer_pause(&self.profile_id).await
+                self.client.timer_pause(&timer_id).await
             } else {
                 return Ok(());
             };
@@ -855,7 +921,19 @@ impl App {
     }
 
     pub async fn resume(&mut self) -> Result<()> {
-        match self.client.timer_resume(&self.profile_id).await {
+        let timer_id = self
+            .timer_info
+            .as_ref()
+            .and_then(|t| t.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let Some(timer_id) = timer_id else {
+            self.status_message = "No timer to resume".to_string();
+            return Ok(());
+        };
+
+        match self.client.timer_resume(&timer_id).await {
             Ok(_) => {
                 self.status_message = "Resumed".to_string();
                 self.refresh_timer().await?;
@@ -868,13 +946,80 @@ impl App {
     }
 
     pub async fn stop_timer(&mut self) -> Result<()> {
-        match self.client.timer_stop(&self.profile_id).await {
+        let timer_id = self
+            .timer_info
+            .as_ref()
+            .and_then(|t| t.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let Some(timer_id) = timer_id else {
+            self.status_message = "No timer to stop".to_string();
+            return Ok(());
+        };
+
+        match self.client.timer_stop(&timer_id).await {
             Ok(_) => {
                 self.status_message = "Timer stopped, entry saved!".to_string();
                 self.selected_timer_button = 0;
                 self.refresh_timer().await?;
                 self.refresh_stats().await?;
                 self.refresh_entries().await?;
+            }
+            Err(e) => {
+                self.status_message = format!("Error: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Stop a timer by its ID (for the Timers list view)
+    pub async fn stop_timer_by_id(&mut self, timer_id: &str) -> Result<()> {
+        match self.client.timer_stop(timer_id).await {
+            Ok(_) => {
+                self.status_message = "Timer stopped, entry saved!".to_string();
+                self.refresh_timer().await?;
+                self.refresh_stats().await?;
+                self.refresh_entries().await?;
+            }
+            Err(e) => {
+                self.status_message = format!("Error: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Pause/Resume a timer by its ID (for the Timers list view)
+    pub async fn toggle_pause_by_id(&mut self, timer_id: &str) -> Result<()> {
+        let timer = self.active_timers.iter().find(|t| {
+            t.get("id")
+                .and_then(|v| v.as_str())
+                .map(|id| id == timer_id)
+                .unwrap_or(false)
+        });
+
+        let state = timer
+            .and_then(|t| t.get("state"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let result = if state == "paused" {
+            self.client.timer_resume(timer_id).await
+        } else if state == "running" {
+            self.client.timer_pause(timer_id).await
+        } else {
+            return Ok(());
+        };
+
+        match result {
+            Ok(_) => {
+                self.status_message = if state == "paused" {
+                    "Resumed"
+                } else {
+                    "Paused"
+                }
+                .to_string();
+                self.refresh_timer().await?;
             }
             Err(e) => {
                 self.status_message = format!("Error: {}", e);
@@ -1100,6 +1245,95 @@ impl App {
                         }
                     }
                 }
+            }
+            InputMode::NewEntryStart => {
+                let input = if self.input_buffer.trim().is_empty() {
+                    "1h ago".to_string()
+                } else {
+                    self.input_buffer.clone()
+                };
+
+                if let Some(dt) = self.parse_flexible_datetime(&input) {
+                    self.new_entry_start = Some(dt.to_rfc3339());
+                    self.input_mode = InputMode::NewEntryEnd;
+                    self.input_buffer.clear();
+                    self.status_message = " End Time (Enter for now): ".to_string();
+                    return Ok(());
+                } else {
+                    self.status_message = "Invalid time. Try: 1h ago, 14:30, now".to_string();
+                    return Ok(());
+                }
+            }
+            InputMode::NewEntryEnd => {
+                let input = if self.input_buffer.trim().is_empty() {
+                    "now".to_string()
+                } else {
+                    self.input_buffer.clone()
+                };
+
+                if let Some(dt) = self.parse_flexible_datetime(&input) {
+                    if let Some(ref start_str) = self.new_entry_start
+                        && let Ok(start_dt) = DateTime::parse_from_rfc3339(start_str)
+                        && dt <= start_dt.with_timezone(&Utc)
+                    {
+                        self.status_message = "End time must be after start time".to_string();
+                        return Ok(());
+                    }
+                    self.new_entry_end = Some(dt.to_rfc3339());
+                    self.input_mode = InputMode::NewEntryTask;
+                    self.input_buffer.clear();
+                    self.new_entry_task_index = 0;
+                    self.status_message = " Select Task (optional): ".to_string();
+                    return Ok(());
+                } else {
+                    self.status_message = "Invalid time. Try: now, 14:30, 30m ago".to_string();
+                    return Ok(());
+                }
+            }
+            InputMode::NewEntryTask => {
+                let tasks = self.get_tasks_for_entry_selection();
+                if self.new_entry_task_index == 0 {
+                    self.new_entry_task_id = None;
+                } else if let Some(task) = tasks.get(self.new_entry_task_index - 1) {
+                    self.new_entry_task_id = task
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+                self.input_mode = InputMode::NewEntryDescription;
+                self.input_buffer.clear();
+                self.status_message = " Description (optional): ".to_string();
+                return Ok(());
+            }
+            InputMode::NewEntryDescription => {
+                let description = if self.input_buffer.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.input_buffer.clone())
+                };
+
+                if let (Some(start), Some(end)) = (&self.new_entry_start, &self.new_entry_end) {
+                    match self
+                        .client
+                        .entry_create(
+                            &self.profile_id,
+                            start,
+                            end,
+                            self.new_entry_task_id.as_deref(),
+                            description.as_deref(),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            self.status_message = "Entry created successfully".to_string();
+                            self.refresh_entries().await?;
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Error: {}", e);
+                        }
+                    }
+                }
+                self.reset_new_entry_state();
             }
             _ => {}
         }
@@ -1496,5 +1730,167 @@ impl App {
 
         self.refresh_reports().await?;
         Ok(())
+    }
+
+    pub fn get_move_task_profiles(&self) -> Vec<&Value> {
+        self.profiles
+            .iter()
+            .filter(|p| {
+                p.get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| id != self.profile_id)
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    pub fn get_selected_move_target_profile(&self) -> Option<&Value> {
+        self.get_move_task_profiles()
+            .get(self.move_task_target_index)
+            .copied()
+    }
+
+    pub async fn move_selected_task(&mut self) -> Result<()> {
+        let filtered_tasks = self.get_filtered_tasks();
+        let task_id = filtered_tasks
+            .get(self.selected_task_index)
+            .and_then(|t| t.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let target_profile_id = self
+            .get_selected_move_target_profile()
+            .and_then(|p| p.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let (Some(task_id), Some(target_id)) = (task_id, target_profile_id) else {
+            self.status_message = "No task or target profile selected".to_string();
+            return Ok(());
+        };
+
+        let target_name = self.get_profile_name_by_id(&target_id).to_string();
+
+        match self
+            .client
+            .task_move(&self.profile_id, &target_id, &task_id, Some(true))
+            .await
+        {
+            Ok(result) => {
+                let entries_moved = result
+                    .get("entries_moved")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                self.status_message =
+                    format!("Moved task to {} ({} entries)", target_name, entries_moved);
+                self.refresh_tasks().await?;
+                let new_len = self.get_filtered_tasks().len();
+                if self.selected_task_index >= new_len {
+                    self.selected_task_index = new_len.saturating_sub(1);
+                }
+            }
+            Err(e) => {
+                self.status_message = format!("Error moving task: {}", e);
+            }
+        }
+
+        self.input_mode = InputMode::Normal;
+        Ok(())
+    }
+
+    pub fn parse_flexible_datetime(&self, input: &str) -> Option<DateTime<Utc>> {
+        let input = input.trim().to_lowercase();
+        let now = Utc::now();
+
+        if input == "now" {
+            return Some(now);
+        }
+
+        if input.ends_with(" ago") || input.ends_with("ago") {
+            let time_part = input
+                .trim_end_matches(" ago")
+                .trim_end_matches("ago")
+                .trim();
+            let mut total_minutes: i64 = 0;
+
+            let h_pos = time_part.find('h');
+            let m_pos = time_part.find('m');
+
+            if let Some(hp) = h_pos
+                && let Ok(hours) = time_part[..hp].trim().parse::<i64>()
+            {
+                total_minutes += hours * 60;
+            }
+
+            if let Some(mp) = m_pos {
+                let start = h_pos.map(|p| p + 1).unwrap_or(0);
+                if let Ok(mins) = time_part[start..mp].trim().parse::<i64>() {
+                    total_minutes += mins;
+                }
+            }
+
+            if h_pos.is_none()
+                && m_pos.is_none()
+                && let Ok(mins) = time_part.parse::<i64>()
+            {
+                total_minutes = mins;
+            }
+
+            if total_minutes > 0 {
+                return Some(now - chrono::Duration::minutes(total_minutes));
+            }
+        }
+
+        if let Ok(dt) = DateTime::parse_from_rfc3339(&input) {
+            return Some(dt.with_timezone(&Utc));
+        }
+
+        let local_now = Local::now();
+
+        if let Ok(time) = NaiveTime::parse_from_str(&input, "%H:%M") {
+            let date = local_now.date_naive();
+            if let Some(dt) = date.and_time(time).and_local_timezone(Local).single() {
+                return Some(dt.with_timezone(&Utc));
+            }
+        }
+
+        if let Ok(time) = NaiveTime::parse_from_str(&input, "%H:%M:%S") {
+            let date = local_now.date_naive();
+            if let Some(dt) = date.and_time(time).and_local_timezone(Local).single() {
+                return Some(dt.with_timezone(&Utc));
+            }
+        }
+
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&input, "%Y-%m-%d %H:%M")
+            && let Some(local_dt) = dt.and_local_timezone(Local).single()
+        {
+            return Some(local_dt.with_timezone(&Utc));
+        }
+
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&input, "%Y-%m-%d %H:%M:%S")
+            && let Some(local_dt) = dt.and_local_timezone(Local).single()
+        {
+            return Some(local_dt.with_timezone(&Utc));
+        }
+
+        None
+    }
+
+    pub fn get_tasks_for_entry_selection(&self) -> Vec<&Value> {
+        self.tasks
+            .iter()
+            .filter(|t| {
+                let status = t.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                self.new_entry_show_archived || status != "archived"
+            })
+            .collect()
+    }
+
+    pub fn reset_new_entry_state(&mut self) {
+        self.new_entry_start = None;
+        self.new_entry_end = None;
+        self.new_entry_task_id = None;
+        self.new_entry_task_index = 0;
+        self.new_entry_show_archived = false;
     }
 }

@@ -34,6 +34,11 @@ struct ProfileParams {
     profile_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct TimerParams {
+    timer_id: String,
+}
+
 pub async fn start_manual(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
     let params: StartManualParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
@@ -111,12 +116,12 @@ pub async fn start_countdown(manager: &Arc<TimerManager>, params: Option<Value>)
 }
 
 pub async fn pause(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
-    let params: ProfileParams = serde_json::from_value(
+    let params: TimerParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
     )?;
 
     manager
-        .pause(&params.profile_id)
+        .pause(&params.timer_id)
         .await
         .map_err(|e| ApiError::Timer(e.to_string()))?;
 
@@ -126,12 +131,12 @@ pub async fn pause(manager: &Arc<TimerManager>, params: Option<Value>) -> Result
 }
 
 pub async fn resume(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
-    let params: ProfileParams = serde_json::from_value(
+    let params: TimerParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
     )?;
 
     manager
-        .resume(&params.profile_id)
+        .resume(&params.timer_id)
         .await
         .map_err(|e| ApiError::Timer(e.to_string()))?;
 
@@ -147,17 +152,17 @@ pub async fn stop(
     config_manager: &Arc<ConfigManager>,
     params: Option<Value>,
 ) -> Result<Value> {
-    let params: ProfileParams = serde_json::from_value(
+    let params: TimerParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
     )?;
 
-    let entry = timer_manager
-        .stop(&params.profile_id)
+    let (profile_id, entry) = timer_manager
+        .stop(&params.timer_id)
         .await
         .map_err(|e| ApiError::Timer(e.to_string()))?;
 
     entry_manager
-        .add(&params.profile_id, entry.clone())
+        .add(&profile_id, entry.clone())
         .await
         .map_err(|e| ApiError::Timer(format!("Failed to save entry: {}", e)))?;
 
@@ -196,12 +201,12 @@ pub async fn stop(
 }
 
 pub async fn cancel(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
-    let params: ProfileParams = serde_json::from_value(
+    let params: TimerParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
     )?;
 
     manager
-        .cancel(&params.profile_id)
+        .cancel(&params.timer_id)
         .await
         .map_err(|e| ApiError::Timer(e.to_string()))?;
 
@@ -211,18 +216,47 @@ pub async fn cancel(manager: &Arc<TimerManager>, params: Option<Value>) -> Resul
 }
 
 pub async fn get(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
+    let params: TimerParams = serde_json::from_value(
+        params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
+    )?;
+
+    tracing::debug!("timer.get called for timer {}", params.timer_id);
+    let timer = manager
+        .get_timer(&params.timer_id)
+        .await
+        .map_err(|e| ApiError::Timer(e.to_string()))?;
+    tracing::debug!("timer.get returning for timer {}", params.timer_id);
+
+    Ok(serde_json::to_value(&timer)?)
+}
+
+pub async fn get_by_profile(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
     let params: ProfileParams = serde_json::from_value(
         params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
     )?;
 
-    tracing::debug!("timer.get called for profile {}", params.profile_id);
-    let timer = manager
-        .get_timer(&params.profile_id)
-        .await
-        .map_err(|e| ApiError::Timer(e.to_string()))?;
-    tracing::debug!("timer.get returning for profile {}", params.profile_id);
+    tracing::debug!(
+        "timer.get_by_profile called for profile {}",
+        params.profile_id
+    );
+    let timers = manager.get_timers_by_profile(&params.profile_id).await;
+    tracing::debug!("timer.get_by_profile returning {} timers", timers.len());
 
-    Ok(serde_json::to_value(&timer)?)
+    // Return the first timer if exists, null otherwise (backward compatibility)
+    if let Some(timer) = timers.first() {
+        Ok(serde_json::to_value(timer)?)
+    } else {
+        Ok(Value::Null)
+    }
+}
+
+pub async fn list_by_profile(manager: &Arc<TimerManager>, params: Option<Value>) -> Result<Value> {
+    let params: ProfileParams = serde_json::from_value(
+        params.ok_or_else(|| ApiError::InvalidParams("Missing params".to_string()))?,
+    )?;
+
+    let timers = manager.get_timers_by_profile(&params.profile_id).await;
+    Ok(serde_json::to_value(&timers)?)
 }
 
 pub async fn list(manager: &Arc<TimerManager>, _params: Option<Value>) -> Result<Value> {
@@ -279,13 +313,14 @@ mod tests {
         let manager = Arc::new(TimerManager::new(event_manager));
 
         let start_params = json!({"profile_id": "test"});
-        start_manual(&manager, Some(start_params)).await.unwrap();
+        let result = start_manual(&manager, Some(start_params)).await.unwrap();
+        let timer_id = result.get("timer_id").unwrap().as_str().unwrap();
 
-        let pause_params = json!({"profile_id": "test"});
+        let pause_params = json!({"timer_id": timer_id});
         let result = pause(&manager, Some(pause_params)).await.unwrap();
         assert_eq!(result.get("status").unwrap(), "paused");
 
-        let resume_params = json!({"profile_id": "test"});
+        let resume_params = json!({"timer_id": timer_id});
         let result = resume(&manager, Some(resume_params)).await.unwrap();
         assert_eq!(result.get("status").unwrap(), "resumed");
     }
@@ -304,5 +339,28 @@ mod tests {
         let result = list(&manager, None).await.unwrap();
         let timers = result.as_object().unwrap();
         assert_eq!(timers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_timers_same_profile() {
+        let event_manager = Arc::new(EventManager::new());
+        let manager = Arc::new(TimerManager::new(event_manager));
+
+        let params1 = json!({"profile_id": "test"});
+        let params2 = json!({"profile_id": "test"});
+
+        let result1 = start_manual(&manager, Some(params1)).await.unwrap();
+        let result2 = start_manual(&manager, Some(params2)).await.unwrap();
+
+        let timer_id1 = result1.get("timer_id").unwrap().as_str().unwrap();
+        let timer_id2 = result2.get("timer_id").unwrap().as_str().unwrap();
+
+        assert_ne!(timer_id1, timer_id2);
+
+        let profile_timers = list_by_profile(&manager, Some(json!({"profile_id": "test"})))
+            .await
+            .unwrap();
+        let timers_arr = profile_timers.as_array().unwrap();
+        assert_eq!(timers_arr.len(), 2);
     }
 }

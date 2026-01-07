@@ -1,11 +1,13 @@
 use crate::{Error, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::{PomodoroConfig, TimerMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActiveTimer {
+    pub id: String,
     pub profile_id: String,
     pub task_id: Option<String>,
     pub task_title: Option<String>,
@@ -18,6 +20,10 @@ pub struct ActiveTimer {
     pub accumulated_work_time: u64,
     pub pomodoro_state: Option<PomodoroState>,
     pub target_duration: Option<u64>,
+}
+
+fn generate_timer_id() -> String {
+    Uuid::new_v4().to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +57,7 @@ impl ActiveTimer {
         task_title: Option<String>,
     ) -> Self {
         Self {
+            id: generate_timer_id(),
             profile_id,
             task_id,
             task_title,
@@ -73,6 +80,7 @@ impl ActiveTimer {
     ) -> Self {
         let now = Utc::now();
         Self {
+            id: generate_timer_id(),
             profile_id,
             task_id,
             task_title,
@@ -99,6 +107,7 @@ impl ActiveTimer {
         duration_minutes: u64,
     ) -> Self {
         Self {
+            id: generate_timer_id(),
             profile_id,
             task_id,
             task_title,

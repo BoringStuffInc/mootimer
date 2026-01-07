@@ -9,6 +9,7 @@ mod kanban;
 mod logs;
 mod reports;
 mod settings;
+mod timers;
 pub mod tomato;
 
 use crate::app::{App, AppView, InputMode};
@@ -27,6 +28,7 @@ use ratatui::{
 };
 use reports::draw_reports;
 use settings::draw_settings;
+use timers::draw_timers;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -42,6 +44,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     match app.current_view {
         AppView::Dashboard => draw_dashboard(f, app, chunks[1]),
+        AppView::Timers => draw_timers(f, app, chunks[1]),
         AppView::Kanban => draw_kanban(f, app, chunks[1]),
         AppView::Entries => draw_entries(f, app, chunks[1]),
         AppView::Reports => draw_reports(f, app, chunks[1]),
@@ -78,8 +81,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         | InputMode::ConfigCountdown
         | InputMode::NewProfile
         | InputMode::RenameProfile
-        | InputMode::EditEntryDuration => {
+        | InputMode::EditEntryDuration
+        | InputMode::NewEntryStart
+        | InputMode::NewEntryEnd
+        | InputMode::NewEntryDescription => {
             draw_input_modal(f, app);
+        }
+        InputMode::MoveTask => {
+            draw_move_task_modal(f, app);
+        }
+        InputMode::NewEntryTask => {
+            draw_task_select_modal(f, app);
         }
         _ => {}
     }
@@ -94,11 +106,12 @@ fn draw_title_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let tabs = [
         ("1", "📊", "Dashboard", AppView::Dashboard),
-        ("2", "📋", "Kanban", AppView::Kanban),
-        ("3", "📝", "Entries", AppView::Entries),
-        ("4", "📈", "Reports", AppView::Reports),
-        ("5", "⚙️", "Settings", AppView::Settings),
-        ("6", "📋", "Logs", AppView::Logs),
+        ("2", "⏱️", "Timers", AppView::Timers),
+        ("3", "📋", "Kanban", AppView::Kanban),
+        ("4", "📝", "Entries", AppView::Entries),
+        ("5", "📈", "Reports", AppView::Reports),
+        ("6", "⚙️", "Settings", AppView::Settings),
+        ("7", "📋", "Logs", AppView::Logs),
     ];
 
     let mut spans = vec![
@@ -178,11 +191,12 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from("    [1]          Dashboard (📊)"),
-        Line::from("    [2]          Kanban Board (📋)"),
-        Line::from("    [3]          Entries Log (📝)"),
-        Line::from("    [4]          Reports (📈)"),
-        Line::from("    [5]          Settings (⚙️)"),
-        Line::from("    [6]          System Logs (📋)"),
+        Line::from("    [2]          Active Timers (⏱️)"),
+        Line::from("    [3]          Kanban Board (📋)"),
+        Line::from("    [4]          Entries Log (📝)"),
+        Line::from("    [5]          Reports (📈)"),
+        Line::from("    [6]          Settings (⚙️)"),
+        Line::from("    [7]          System Logs (📋)"),
         Line::from("    [m]          Moo! (🐮)"),
         Line::from("    [?]          Toggle this Help"),
         Line::from("    [q] / [Esc]  Quit MooTimer"),
@@ -213,6 +227,7 @@ fn draw_help_modal(f: &mut Frame, _app: &App) {
         Line::from("    [Shift+A]    Toggle View: Active vs. Archived Tasks"),
         Line::from("    [v]          Toggle Visibility of Task Descriptions"),
         Line::from("    [/]          Search Tasks"),
+        Line::from("    [m]          Move Task to Another Profile"),
         Line::from("    [↑↓] / [j/k] Navigate Tasks"),
         Line::from("    [g]g / [G]   Jump to Top / Bottom"),
         Line::from(""),
@@ -322,7 +337,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             InputMode::Normal => {
                 let hints = match app.current_view {
                     AppView::Dashboard => "[1-6]Views • [?]Help • [q]Quit",
-                    AppView::Kanban => "[1-6]Views • [h/l]Col • [j/k]Card • [a]Arch • [A]View",
+                    AppView::Kanban => "[1-6]Views • [h/l]Col • [j/k]Card • [m]Move • [a]Arch",
                     _ => "[1-6]Views • [↑↓/j/k]Nav • [q]Quit",
                 };
                 Span::raw(hints)
@@ -409,6 +424,158 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         );
 
     f.render_widget(status, area);
+}
+
+fn draw_task_select_modal(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let modal_width = 60.min(area.width.saturating_sub(4));
+    let tasks = app.get_tasks_for_entry_selection();
+    let modal_height = (tasks.len() as u16 + 8)
+        .min(area.height.saturating_sub(4))
+        .max(10);
+
+    let modal_area = Rect {
+        x: (area.width.saturating_sub(modal_width)) / 2,
+        y: (area.height.saturating_sub(modal_height)) / 2,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    f.render_widget(Clear, modal_area);
+
+    let mut items: Vec<ratatui::widgets::ListItem> = vec![{
+        let is_selected = app.new_entry_task_index == 0;
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let prefix = if is_selected { "→ " } else { "  " };
+        ratatui::widgets::ListItem::new(format!("{}(No task)", prefix)).style(style)
+    }];
+
+    for (i, task) in tasks.iter().enumerate() {
+        let title = task
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Untitled");
+        let status = task.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let is_archived = status == "archived";
+        let is_selected = app.new_entry_task_index == i + 1;
+
+        let style = if is_selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else if is_archived {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let prefix = if is_selected { "→ " } else { "  " };
+        let archived_marker = if is_archived { " [archived]" } else { "" };
+        let display = format!("{}{}{}", prefix, title, archived_marker);
+        let truncated = if display.len() > modal_width as usize - 4 {
+            format!("{}...", &display[..modal_width as usize - 7])
+        } else {
+            display
+        };
+        items.push(ratatui::widgets::ListItem::new(truncated).style(style));
+    }
+
+    let archived_hint = if app.new_entry_show_archived {
+        "[a] Hide archived"
+    } else {
+        "[a] Show archived"
+    };
+    let hint = format!(" [j/k]Select [Enter]Choose [Esc]Skip | {} ", archived_hint);
+
+    let list = ratatui::widgets::List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Select Task (optional) ")
+            .title_bottom(Line::from(hint).right_aligned())
+            .border_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+    );
+
+    f.render_widget(list, modal_area);
+}
+
+fn draw_move_task_modal(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let modal_width = 50.min(area.width.saturating_sub(4));
+    let profiles = app.get_move_task_profiles();
+    let modal_height = (profiles.len() as u16 + 6).min(area.height.saturating_sub(4));
+
+    let modal_area = Rect {
+        x: (area.width.saturating_sub(modal_width)) / 2,
+        y: (area.height.saturating_sub(modal_height)) / 2,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    f.render_widget(Clear, modal_area);
+
+    let task_title = app
+        .get_filtered_tasks()
+        .get(app.selected_task_index)
+        .and_then(|t| t.get("title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown task");
+
+    let title = format!(" Move: {} ", task_title);
+    let truncated_title = if title.len() > modal_width as usize - 2 {
+        format!("{}...", &title[..modal_width as usize - 5])
+    } else {
+        title
+    };
+
+    let items: Vec<ratatui::widgets::ListItem> = profiles
+        .iter()
+        .enumerate()
+        .map(|(i, profile)| {
+            let name = profile
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown");
+            let is_selected = i == app.move_task_target_index;
+
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let prefix = if is_selected { "→ " } else { "  " };
+            ratatui::widgets::ListItem::new(format!("{}{}", prefix, name)).style(style)
+        })
+        .collect();
+
+    let list = ratatui::widgets::List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(truncated_title)
+            .title_bottom(Line::from(" [j/k]Select [Enter]Move [Esc]Cancel ").right_aligned())
+            .border_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+    );
+
+    f.render_widget(list, modal_area);
 }
 
 fn draw_cow_modal(f: &mut Frame) {
